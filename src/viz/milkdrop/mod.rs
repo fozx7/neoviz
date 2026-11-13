@@ -90,7 +90,9 @@ impl MilkDrop {
             self.status = Some(PRESETS_HINT.to_owned());
             return;
         }
-        let dir = Path::new(self.preset_dir.trim());
+        let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf());
+        let dir = presets::expand_home(&self.preset_dir, home.as_deref());
+        let dir = dir.as_path();
         match presets::scan(dir) {
             Ok(found) if found.is_empty() => {
                 self.status = Some(format!("No .milk presets found in {}", dir.display()));

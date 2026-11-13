@@ -58,6 +58,16 @@ fn is_preset(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
 }
 
+/// Expands a leading `~` to `home`, as a shell would. Other paths are unchanged.
+pub fn expand_home(path: &str, home: Option<&Path>) -> PathBuf {
+    let path = path.trim();
+    match (path.strip_prefix('~'), home) {
+        (Some(""), Some(home)) => home.to_path_buf(),
+        (Some(rest), Some(home)) if rest.starts_with('/') => home.join(&rest[1..]),
+        _ => PathBuf::from(path),
+    }
+}
+
 /// A preset's name for display: its file name without `.milk`.
 pub fn display_name(path: &Path) -> String {
     path.file_stem().map_or_else(
@@ -154,6 +164,27 @@ mod tests {
     fn scanning_a_missing_folder_is_an_error() {
         let dir = temp_dir("missing").join("nope");
         assert!(scan(&dir).is_err());
+    }
+
+    #[test]
+    fn tilde_expands_to_home() {
+        let home = Some(Path::new("/home/me"));
+        assert_eq!(
+            expand_home("~/presets", home),
+            Path::new("/home/me/presets")
+        );
+        assert_eq!(expand_home("  ~  ", home), Path::new("/home/me"));
+    }
+
+    #[test]
+    fn other_paths_are_left_alone() {
+        let home = Some(Path::new("/home/me"));
+        assert_eq!(expand_home("/abs/presets", home), Path::new("/abs/presets"));
+        assert_eq!(
+            expand_home("~other/presets", home),
+            Path::new("~other/presets")
+        );
+        assert_eq!(expand_home("~/x", None), Path::new("~/x"));
     }
 
     #[test]
