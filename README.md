@@ -23,12 +23,12 @@ Install the PulseAudio client libraries (they also work on PipeWire via `pipewir
 
 Nothing extra beyond the Rust toolchain (MSVC).
 
-### MilkDrop presets (optional, Linux)
+### MilkDrop presets (Linux)
 
-neoViz can play MilkDrop presets through [libprojectM](https://github.com/projectM-visualizer/projectm), built from source as part of the build. You'll need `cmake`, a C++ compiler and the OpenGL/EGL headers (on Arch these come with `base-devel`, `cmake` and `mesa`; on Debian/Ubuntu: `cmake g++ libegl-dev libgl-dev`).
+On Linux, neoViz plays MilkDrop presets through [libprojectM](https://github.com/projectM-visualizer/projectm), built from source as part of the normal build (the first build takes ~30 s longer). You'll need `cmake`, a C++ compiler and the OpenGL/EGL headers (on Arch these come with `base-devel`, `cmake` and `mesa`; on Debian/Ubuntu: `cmake g++ libegl-dev libgl-dev`).
 
 ```sh
-cargo run --release --features milkdrop -- --presets ~/milkdrop-presets
+cargo run --release -- --presets ~/milkdrop-presets
 ```
 
 Presets aren't included. A good start is the "cream of the crop" pack:
@@ -39,7 +39,7 @@ git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-
 
 The folder can also be set in the settings overlay. MilkDrop then appears as one more visualizer: it changes preset every 30 s (adjustable), and `[` / `]` step through presets.
 
-projectM is LGPL-3.0 and is linked statically into MilkDrop builds. That's fine for personal use; if you distribute such a build, the LGPL requires that recipients can relink it against their own projectM. The default build doesn't include projectM.
+projectM is LGPL-3.0 and is linked statically into MilkDrop builds. That's fine for personal use; if you distribute such a build, the LGPL requires that recipients can relink it against their own projectM. To build without it, use `--no-default-features`.
 
 ## Usage
 

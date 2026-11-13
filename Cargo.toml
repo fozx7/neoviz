@@ -14,11 +14,8 @@ egui = { version = "0.37", features = ["default_fonts"] }
 egui-wgpu = "0.37"
 egui-winit = "0.37"
 env_logger = "0.11"
-glow = { version = "0.18", optional = true }
-khronos-egl = { version = "6", features = ["static"], optional = true }
 log = "0.4"
 pollster = "1"
-projectm = { version = "3.1", features = ["static"], optional = true }
 realfft = "3.5"
 rtrb = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -39,11 +36,17 @@ codegen-units = 1
 [target.'cfg(target_os = "linux")'.dependencies]
 libpulse-binding = "2.30"
 libpulse-simple-binding = "2.29"
+# MilkDrop (feature "milkdrop"); Linux-only, so the feature is a no-op elsewhere.
+glow = { version = "0.18", optional = true }
+khronos-egl = { version = "6", features = ["static"], optional = true }
+projectm = { version = "3.1", features = ["static"], optional = true }
 
 [target."cfg(windows)".dependencies]
 cpal = "0.18"
 
 [features]
-# MilkDrop presets via libprojectM (builds projectM v4 from source; needs cmake,
-# a C++ compiler and OpenGL dev headers). Off by default.
+default = ["milkdrop"]
+# MilkDrop presets via libprojectM, Linux only (builds projectM v4 from source;
+# needs cmake, a C++ compiler and OpenGL/EGL headers). Build without it with
+# `--no-default-features`.
 milkdrop = ["dep:projectm", "dep:khronos-egl", "dep:glow"]

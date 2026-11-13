@@ -64,7 +64,7 @@ pub struct AudioFrame<'a> {
     pub silent: bool,
     /// Stereo frames captured since the previous analysis (the newest
     /// `new_frames` entries of `left`/`right`, capped at their length).
-    #[cfg_attr(not(feature = "milkdrop"), allow(dead_code))]
+    #[cfg_attr(not(all(feature = "milkdrop", target_os = "linux")), allow(dead_code))]
     pub new_frames: usize,
 }
 
