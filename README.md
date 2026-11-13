@@ -4,7 +4,23 @@ A retro-style music visualizer for Windows and Linux. It listens to whatever you
 
 > **Status:** usable. Audio capture, all seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay, saved settings and optional MilkDrop presets (Linux) are in. Packaging is next. See [SCOPE.md](SCOPE.md) for the full plan.
 
-## Build
+## Install
+
+Download the latest package from the repo's **Releases** page.
+
+**Linux:** unpack and run the installer. It puts `neoviz` in `~/.local/bin` and adds neoViz to your app menu (no root needed):
+
+```sh
+tar xzf neoviz-*-linux-x86_64.tar.gz
+cd neoviz-*-linux-x86_64 && ./install.sh
+```
+
+`./install.sh --uninstall` removes it again (your settings are kept). Needs PulseAudio or PipeWire, and OpenGL/EGL, which any desktop has.
+
+**Windows:** unzip anywhere and run `neoviz.exe`.
+
+To install your own build instead: `cargo build --profile dist`, then `packaging/linux/install.sh` from the repo.
+
 
 You need a recent stable Rust toolchain ([rustup.rs](https://rustup.rs)).
 
@@ -50,7 +66,7 @@ neoviz [--fullscreen] [--span] [--monitor N] [--device NAME] [--visualizer NAME]
 By default neoViz captures whatever is playing on your default output device and follows it if you switch outputs. Use `--device` to capture something else, such as a microphone:
 
 - Linux: a PulseAudio source name (run `neoviz --list-devices`).
-- Windows: the device name as shown in Sound settings (or `--list-devices`).
+- Windows: the device name as shown in Sound settings (`--list-devices` prints nothing from release builds, which have no console; use the overlay's device list).
 
 You can also pick the device in the settings overlay (`Tab`).
 
@@ -78,3 +94,13 @@ Too fast or too flashy? In the overlay's **Motion** section, *Speed* slows the v
 Settings are saved automatically to `~/.config/neoviz/settings.toml` (Linux) or `%APPDATA%\neoviz\config\settings.toml` (Windows). The audio device is the exception: every launch starts on the current default output, and a device picked in the overlay or with `--device` lasts for that run only.
 
 Set `RUST_LOG=debug` for verbose logging.
+
+## Releasing
+
+Bump `version` in `Cargo.toml`, commit, then tag and push:
+
+```sh
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+The Release workflow builds optimised Linux and Windows packages and publishes them as a GitHub release.

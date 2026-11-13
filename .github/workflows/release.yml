@@ -1,0 +1,87 @@
+name: Release
+
+# Push a tag like v1.0.0 to build and publish a release. Running it by hand
+# (Actions → Release → Run workflow) builds the packages as artifacts only.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: windows-latest
+            target: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux audio and OpenGL dev libs
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libpulse-dev libegl-dev libgl-dev cmake g++
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: dist
+
+      - name: Build
+        run: cargo build --profile dist --locked
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          name="neoviz-${GITHUB_REF_NAME//\//-}-${{ matrix.target }}"
+          mkdir "$name"
+          cp target/dist/neoviz README.md LICENSE packaging/linux/* "$name/"
+          tar czf "$name.tar.gz" "$name"
+          echo "PACKAGE=$name.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $name = "neoviz-$($env:GITHUB_REF_NAME -replace '/', '-')-${{ matrix.target }}"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item target/dist/neoviz.exe, README.md, LICENSE $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          "PACKAGE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: ${{ env.PACKAGE }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" neoviz-*
+          --repo "$GITHUB_REPOSITORY"
+          --title "neoViz $GITHUB_REF_NAME"
+          --generate-notes
