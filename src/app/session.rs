@@ -5,10 +5,10 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
 use winit::{
-    dpi::PhysicalSize,
+    dpi::{LogicalSize, PhysicalSize},
     event_loop::ActiveEventLoop,
     monitor::MonitorHandle,
-    window::{Fullscreen, UserAttentionType, Window, WindowId, WindowLevel},
+    window::{Fullscreen, Window, WindowId, WindowLevel},
 };
 
 use super::layout::{self, Rect};
@@ -35,6 +35,8 @@ use crate::{
 };
 
 const WINDOW_TITLE: &str = "neoViz";
+/// Size of the window when not full screen.
+pub const WINDOWED_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 /// Longest frame time fed to the analysis, in seconds.
 const MAX_FRAME_DT: f32 = 0.1;
 /// How often changed settings are written to disk.
@@ -57,6 +59,8 @@ pub struct Session {
     /// The part of the canvas each display shows (same order as `displays`).
     slices: Vec<Slice>,
     spanning: bool,
+    /// Which of our windows has keyboard focus, if any.
+    focused: Option<WindowId>,
     /// Every frame is rendered here, then copied to the displays.
     canvas: Canvas,
     capture: Capture,
@@ -127,6 +131,7 @@ impl Session {
             displays: vec![main],
             slices: vec![WHOLE],
             spanning: false,
+            focused: None,
             gpu,
         };
         session.update_title();
@@ -150,6 +155,15 @@ impl Session {
 
     pub fn is_spanning(&self) -> bool {
         self.spanning
+    }
+
+    /// Tracks which of our windows has keyboard focus.
+    pub fn on_focus(&mut self, id: WindowId, focused: bool) {
+        if focused {
+            self.focused = Some(id);
+        } else if self.focused == Some(id) {
+            self.focused = None;
+        }
     }
 
     /// Lets the UI see a main-window event first. Returns true if it used it.
@@ -247,11 +261,29 @@ impl Session {
     }
 
     /// Back to one window, windowed.
+    ///
+    /// The window that has keyboard focus stays and becomes the main window;
+    /// the others close. Closing the focused window would make the compositor
+    /// hand focus to another app, and Wayland doesn't let apps take it back.
     pub fn leave_span(&mut self) {
-        // Ask for focus first, while one of our windows still has it: closing
-        // the span windows otherwise hands focus to whatever app is behind them.
-        refocus(self.window());
-        // Dropping the extra displays closes their windows.
+        if let Some(i) = self
+            .displays
+            .iter()
+            .position(|d| Some(d.window.id()) == self.focused)
+            && i != 0
+        {
+            self.displays.swap(0, i);
+            let window = self.window();
+            window.set_decorations(!self.settings.borderless);
+            window.set_window_level(if self.settings.always_on_top {
+                WindowLevel::AlwaysOnTop
+            } else {
+                WindowLevel::Normal
+            });
+            let _ = window.request_inner_size(WINDOWED_SIZE);
+            self.update_title();
+        }
+        // Dropping the other displays closes their windows.
         self.displays.truncate(1);
         self.slices = vec![WHOLE];
         self.spanning = false;
@@ -597,23 +629,6 @@ impl Session {
             Ok(()) => self.saved = self.settings.clone(),
             Err(e) => log::warn!("saving settings: {e:#}"),
         }
-    }
-}
-
-/// Gives the main window keyboard focus again.
-///
-/// Wayland doesn't let apps take focus; the polite route is an xdg-activation
-/// request (winit sends one for a user-attention request), which KWin grants
-/// when it comes from the app that has focus. Elsewhere, focus it directly.
-fn refocus(window: &Window) {
-    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    let wayland = window
-        .window_handle()
-        .is_ok_and(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(_)));
-    if wayland {
-        window.request_user_attention(Some(UserAttentionType::Informational));
-    } else {
-        window.focus_window();
     }
 }
 

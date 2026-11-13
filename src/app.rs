@@ -7,10 +7,10 @@ mod session;
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use session::{Outcome, Session};
+use session::{Outcome, Session, WINDOWED_SIZE};
 use winit::{
     application::ApplicationHandler,
-    dpi::{LogicalSize, PhysicalPosition},
+    dpi::PhysicalPosition,
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::ActiveEventLoop,
     monitor::MonitorHandle,
@@ -25,7 +25,6 @@ use crate::{
     viz,
 };
 
-const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 /// Offset from the chosen monitor's top-left corner when opening windowed.
 const WINDOW_MONITOR_OFFSET: i32 = 64;
 
@@ -80,7 +79,7 @@ impl App {
         let monitor = pick_monitor(event_loop, self.args.monitor)?;
         let mut attrs = Window::default_attributes()
             .with_title("neoViz")
-            .with_inner_size(DEFAULT_WINDOW_SIZE)
+            .with_inner_size(WINDOWED_SIZE)
             .with_decorations(!self.settings.borderless);
         if self.settings.always_on_top {
             attrs = attrs.with_window_level(WindowLevel::AlwaysOnTop);
@@ -156,6 +155,10 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => {
                 session.on_resized(id, *size);
+                return;
+            }
+            WindowEvent::Focused(focused) => {
+                session.on_focus(id, *focused);
                 return;
             }
             // One redraw renders every window, so only the main one drives it.
