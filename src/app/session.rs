@@ -59,8 +59,6 @@ pub struct Session {
     /// The part of the canvas each display shows (same order as `displays`).
     slices: Vec<Slice>,
     spanning: bool,
-    /// Which of our windows has keyboard focus, if any.
-    focused: Option<WindowId>,
     /// Every frame is rendered here, then copied to the displays.
     canvas: Canvas,
     capture: Capture,
@@ -131,7 +129,6 @@ impl Session {
             displays: vec![main],
             slices: vec![WHOLE],
             spanning: false,
-            focused: None,
             gpu,
         };
         session.update_title();
@@ -155,15 +152,6 @@ impl Session {
 
     pub fn is_spanning(&self) -> bool {
         self.spanning
-    }
-
-    /// Tracks which of our windows has keyboard focus.
-    pub fn on_focus(&mut self, id: WindowId, focused: bool) {
-        if focused {
-            self.focused = Some(id);
-        } else if self.focused == Some(id) {
-            self.focused = None;
-        }
     }
 
     /// Lets the UI see a main-window event first. Returns true if it used it.
@@ -262,28 +250,11 @@ impl Session {
 
     /// Back to one window, windowed.
     ///
-    /// The window that has keyboard focus stays and becomes the main window;
-    /// the others close. Closing the focused window would make the compositor
-    /// hand focus to another app, and Wayland doesn't let apps take it back.
+    /// The original main window always stays, so it returns to its own
+    /// monitor and size. (On KDE Wayland focus may stay on the other monitor:
+    /// see the README's span mode notes.)
     pub fn leave_span(&mut self) {
-        if let Some(i) = self
-            .displays
-            .iter()
-            .position(|d| Some(d.window.id()) == self.focused)
-            && i != 0
-        {
-            self.displays.swap(0, i);
-            let window = self.window();
-            window.set_decorations(!self.settings.borderless);
-            window.set_window_level(if self.settings.always_on_top {
-                WindowLevel::AlwaysOnTop
-            } else {
-                WindowLevel::Normal
-            });
-            let _ = window.request_inner_size(WINDOWED_SIZE);
-            self.update_title();
-        }
-        // Dropping the other displays closes their windows.
+        // Dropping the extra displays closes their windows.
         self.displays.truncate(1);
         self.slices = vec![WHOLE];
         self.spanning = false;

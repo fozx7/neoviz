@@ -71,6 +71,8 @@ You can also pick the device in the settings overlay (`Tab`).
 
 Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy Particles, Classic Lightshow, Starfield Warp, then variants: LED Bars, Ring Scope, Mirror Bars, Stereo X/Y.
 
+**Span mode on KDE Plasma (Wayland):** by default KWin gives a newly opened window focus, and when it closes, passes focus only to windows on the *same* monitor. So after leaving span mode, neoViz may need a click before keys work again. To avoid that, turn off *System Settings → Window Management → Window Behavior → Focus → Separate screen focus*.
+
 Settings are saved automatically to `~/.config/neoviz/settings.toml` (Linux) or `%APPDATA%\neoviz\config\settings.toml` (Windows). The audio device is the exception: every launch starts on the current default output, and a device picked in the overlay or with `--device` lasts for that run only.
 
 Set `RUST_LOG=debug` for verbose logging.

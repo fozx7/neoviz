@@ -157,10 +157,6 @@ impl ApplicationHandler for App {
                 session.on_resized(id, *size);
                 return;
             }
-            WindowEvent::Focused(focused) => {
-                session.on_focus(id, *focused);
-                return;
-            }
             // One redraw renders every window, so only the main one drives it.
             WindowEvent::RedrawRequested if is_main => {
                 session.redraw();
