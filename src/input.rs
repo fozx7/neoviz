@@ -12,12 +12,16 @@ pub enum Action {
     ToggleFullscreen,
     /// Leave full screen if in it, otherwise quit.
     Escape,
+    SensitivityUp,
+    SensitivityDown,
 }
 
 /// Returns the action bound to a key press, if any.
 pub fn action_for_key(key: &Key) -> Option<Action> {
     match key {
         Key::Named(NamedKey::Escape) => Some(Action::Escape),
+        Key::Named(NamedKey::ArrowUp) => Some(Action::SensitivityUp),
+        Key::Named(NamedKey::ArrowDown) => Some(Action::SensitivityDown),
         Key::Character(c) if c.eq_ignore_ascii_case("f") => Some(Action::ToggleFullscreen),
         _ => None,
     }
@@ -62,6 +66,18 @@ mod tests {
         assert_eq!(
             action_for_key(&Key::Named(NamedKey::Escape)),
             Some(Action::Escape)
+        );
+    }
+
+    #[test]
+    fn arrows_adjust_sensitivity() {
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::ArrowUp)),
+            Some(Action::SensitivityUp)
+        );
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::ArrowDown)),
+            Some(Action::SensitivityDown)
         );
     }
 

@@ -10,6 +10,8 @@
 //! restarted). A macOS backend can be added the same way later.
 
 pub mod analysis;
+pub mod bands;
+mod beat;
 
 #[cfg(target_os = "linux")]
 mod linux;

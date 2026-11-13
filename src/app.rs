@@ -14,7 +14,10 @@ use winit::{
 
 use crate::{
     Args,
-    audio::{Capture, analysis::Analyzer},
+    audio::{
+        Capture,
+        analysis::{Analyzer, GAIN_STEP_DB},
+    },
     input::{Action, DoubleClickDetector, action_for_key},
     render::{debug_view::DebugView, gpu::Gpu},
 };
@@ -23,6 +26,8 @@ const WINDOW_TITLE: &str = "neoViz";
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 /// Offset from the chosen monitor's top-left corner when opening windowed.
 const WINDOW_MONITOR_OFFSET: i32 = 64;
+/// Longest frame time fed to the analysis, in seconds.
+const MAX_FRAME_DT: f32 = 0.1;
 
 pub struct App {
     args: Args,
@@ -37,17 +42,25 @@ struct Running {
     capture: Capture,
     analyzer: Analyzer,
     debug_view: DebugView,
+    last_frame: Instant,
 }
 
 impl Running {
     fn redraw(&mut self) {
+        let now = Instant::now();
+        // Clamp so a stall (e.g. dragging the window) doesn't cause a huge jump.
+        let dt = (now - self.last_frame).as_secs_f32().min(MAX_FRAME_DT);
+        self.last_frame = now;
+
+        let sample_rate = self.capture.sample_rate();
         self.analyzer.ingest(&mut self.capture.consumer);
-        self.analyzer.analyze();
+        self.analyzer.analyze(sample_rate, dt);
         self.debug_view.update(
             self.gpu.queue(),
-            &self.analyzer,
-            self.capture.sample_rate(),
+            &self.analyzer.frame(),
+            sample_rate,
             self.gpu.size(),
+            dt,
         );
         let debug_view = &self.debug_view;
         self.gpu
@@ -104,13 +117,27 @@ impl App {
             capture,
             analyzer: Analyzer::default(),
             debug_view,
+            last_frame: Instant::now(),
         })
     }
 
     fn apply(&mut self, action: Action, event_loop: &ActiveEventLoop) {
-        let Some(running) = &self.running else { return };
+        let Some(running) = &mut self.running else {
+            return;
+        };
         let window = &running.window;
         match action {
+            Action::SensitivityUp | Action::SensitivityDown => {
+                let step = if action == Action::SensitivityUp {
+                    GAIN_STEP_DB
+                } else {
+                    -GAIN_STEP_DB
+                };
+                let gain = running.analyzer.adjust_gain(step);
+                log::info!("sensitivity {gain:+} dB");
+                // Until the on-screen overlay exists, the title bar shows it.
+                window.set_title(&format!("{WINDOW_TITLE} · sensitivity {gain:+} dB"));
+            }
             Action::ToggleFullscreen => {
                 let next = match window.fullscreen() {
                     Some(_) => None,

@@ -1,21 +1,34 @@
-//! Debug view of the raw analysis: waveform on top, spectrum below.
+//! Debug view of the analysis: waveform, raw spectrum, then bands and levels.
 
-use crate::audio::analysis::{Analyzer, FFT_SIZE, SPECTRUM_BINS, WAVEFORM_LEN};
+use crate::audio::{
+    analysis::{AudioFrame, FFT_SIZE, SPECTRUM_BINS, WAVEFORM_LEN},
+    bands::smoothing_coef,
+};
 
 /// Bottom of the spectrum display in dBFS.
 const DISPLAY_DB_MIN: f32 = -90.0;
+/// How quickly the beat flash fades.
+const FLASH_DECAY_SECS: f32 = 0.12;
+// Rows of the data texture; must match the shader.
 const WAVEFORM_ROW: u32 = 0;
 const SPECTRUM_ROW: u32 = 1;
+const BANDS_ROW: u32 = 2;
+const PEAKS_ROW: u32 = 3;
+const LEVELS_ROW: u32 = 4;
+const DATA_ROWS: u32 = 5;
 const DATA_WIDTH: u32 = SPECTRUM_BINS as u32;
-const PARAMS_FLOATS: usize = 8;
+/// Uniform size in floats (a multiple of 4 for 16-byte alignment).
+const PARAMS_FLOATS: usize = 12;
 
 pub struct DebugView {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     params: wgpu::Buffer,
     data: wgpu::Texture,
-    /// Reused staging space for converting f32 slices to bytes.
+    /// Reused staging space for converting floats to bytes.
     bytes: Vec<u8>,
+    /// Beat flash brightness, 0..1, fading after each beat.
+    flash: f32,
 }
 
 impl DebugView {
@@ -35,7 +48,7 @@ impl DebugView {
             label: Some("debug view data"),
             size: wgpu::Extent3d {
                 width: DATA_WIDTH,
-                height: 2,
+                height: DATA_ROWS,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -120,6 +133,7 @@ impl DebugView {
             params,
             data,
             bytes: Vec::new(),
+            flash: 0.0,
         }
     }
 
@@ -127,10 +141,16 @@ impl DebugView {
     pub fn update(
         &mut self,
         queue: &wgpu::Queue,
-        analyzer: &Analyzer,
+        audio: &AudioFrame,
         sample_rate: u32,
         size: (u32, u32),
+        dt: f32,
     ) {
+        self.flash *= 1.0 - smoothing_coef(FLASH_DECAY_SECS, dt);
+        if audio.beat {
+            self.flash = self.flash.max(audio.beat_intensity);
+        }
+
         let params: [f32; PARAMS_FLOATS] = [
             size.0 as f32,
             size.1 as f32,
@@ -139,15 +159,26 @@ impl DebugView {
             WAVEFORM_LEN as f32,
             SPECTRUM_BINS as f32,
             DISPLAY_DB_MIN,
+            audio.bands.len() as f32,
+            self.flash,
+            f32::from(u8::from(audio.silent)),
+            0.0,
             0.0,
         ];
-        queue.write_buffer(&self.params, 0, to_bytes(&mut self.bytes, &params));
-        self.write_row(queue, WAVEFORM_ROW, analyzer.waveform());
-        self.write_row(queue, SPECTRUM_ROW, analyzer.spectrum_db());
+        to_bytes(&mut self.bytes, params);
+        queue.write_buffer(&self.params, 0, &self.bytes);
+
+        self.write_row(queue, WAVEFORM_ROW, audio.waveform.iter().copied());
+        self.write_row(queue, SPECTRUM_ROW, audio.spectrum_db.iter().copied());
+        self.write_row(queue, BANDS_ROW, audio.bands.values().iter().copied());
+        self.write_row(queue, PEAKS_ROW, audio.bands.peaks());
+        let levels = [audio.rms, audio.bass, audio.mid, audio.treble, audio.peak];
+        self.write_row(queue, LEVELS_ROW, levels);
     }
 
-    fn write_row(&mut self, queue: &wgpu::Queue, row: u32, values: &[f32]) {
-        let width = values.len() as u32;
+    fn write_row(&mut self, queue: &wgpu::Queue, row: u32, values: impl IntoIterator<Item = f32>) {
+        to_bytes(&mut self.bytes, values);
+        let width = (self.bytes.len() / size_of::<f32>()) as u32;
         debug_assert!(width <= DATA_WIDTH);
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -156,7 +187,7 @@ impl DebugView {
                 origin: wgpu::Origin3d { x: 0, y: row, z: 0 },
                 aspect: wgpu::TextureAspect::All,
             },
-            to_bytes(&mut self.bytes, values),
+            &self.bytes,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * size_of::<f32>() as u32),
@@ -190,8 +221,7 @@ impl DebugView {
     }
 }
 
-fn to_bytes<'a>(buf: &'a mut Vec<u8>, values: &[f32]) -> &'a [u8] {
+fn to_bytes(buf: &mut Vec<u8>, values: impl IntoIterator<Item = f32>) {
     buf.clear();
-    buf.extend(values.iter().flat_map(|v| v.to_ne_bytes()));
-    buf
+    buf.extend(values.into_iter().flat_map(f32::to_ne_bytes));
 }
