@@ -1,5 +1,7 @@
 # neoViz: Scope Document
 
+> **Status (2026-11-14):** **v0.9.0** is released. All milestones are done except MilkDrop on Windows. What's left before 1.0 is in §15. Where the build differs from the original plan, the relevant section says so under **As built**.
+
 ## 1. Summary
 
 **neoViz** is a small standalone desktop app for **Windows and Linux** (macOS is a planned later addition, see §10). It listens to whatever audio the computer is playing (Spotify, a browser, a game, anything) and draws full-screen visualizations that react to it, in the style of the mid-2000s Windows Media Player and iTunes visualizers. It doesn't play music. It only listens to the system output and draws.
@@ -24,54 +26,49 @@ This is a personal project, so keep it simple. A single binary per platform is b
 - No app store distribution, code signing, or auto-update.
 - No pixel-for-pixel copies of the Microsoft or Apple visualizers. Build originals *inspired by* them, with no trademarked names in the UI.
 
-## 4. Recommended tech stack
+## 4. Tech stack
 
-| Concern | Choice | Notes |
+| Concern | Choice | As built |
 |---|---|---|
-| Language | **Rust** | One codebase that cross-compiles, single static-ish binary. (C++ is an acceptable alternative if projectM integration proves painful in Rust.) |
-| Window + input | `winit` | Cross-platform windowing, full-screen toggle, keyboard. |
-| Rendering | `wgpu` (WGSL shaders) | Vulkan/DX12/Metal under one API. |
-| Simple UI overlay | `egui` (via `egui-wgpu`) | Settings panel and the on-screen name of the current visualizer. |
-| FFT | `rustfft` or `realfft` | |
-| Audio capture | Per-platform backend behind a trait (see §5) | |
-| MilkDrop presets | `libprojectM` v4 (C API) via FFI or an existing Rust binding | Feature-flagged so the app builds without it. |
-| Config | `serde` + TOML in the OS config dir (`directories` crate) | |
+| Language | **Rust** | Rust 2024 edition. |
+| Window + input | `winit` | `winit` 0.30. |
+| Rendering | `wgpu` (WGSL shaders) | `wgpu` 30. |
+| UI overlay | `egui` (via `egui-wgpu`) | `egui` 0.37. |
+| FFT | `rustfft` or `realfft` | `realfft`. |
+| Ring buffer | (unspecified) | `rtrb`, lock-free SPSC. |
+| Audio capture | Per-platform backend (see §5) | Windows: `cpal` (WASAPI). Linux: `libpulse-simple-binding`. |
+| MilkDrop presets | `libprojectM` v4 | `projectm` crate, built from source and linked statically; hidden EGL context via `khronos-egl` + `glow`. |
+| Config | `serde` + TOML via `directories` | As planned. |
+| CLI | (unspecified) | `clap`. |
+| Screen keep-awake | (not planned) | `keepawake`. |
 
 ## 5. Audio capture: the hard part
 
-Define one trait so the rest of the app doesn't care about the OS:
+The original plan was an `AudioSource` trait. **As built:** each OS backend is a `run(Arc<CaptureContext>)` function selected with `#[cfg]`. It runs on its own thread, pushes interleaved stereo `f32` into a lock-free ring buffer, and reconnects on any error (device unplugged, default device changed, sound server restarted) after a 1 s delay. This is simpler than a trait and gives the same seam for a macOS backend.
 
-```rust
-trait AudioSource {
-    fn start(&mut self, sink: RingBufferProducer<f32>) -> Result<()>;
-    fn stop(&mut self);
-    fn sample_rate(&self) -> u32;
-    fn list_devices() -> Vec<DeviceInfo>;
-}
-```
-
-| OS | Approach | Notes |
+| OS | Approach | As built |
 |---|---|---|
-| **Windows** | WASAPI **loopback** on the default render device | Well supported. `cpal` can open an output device as an input stream on WASAPI. Or call the `windows` crate directly. Follow default-device changes (e.g. when headphones are plugged in). |
-| **Linux** | Capture the **monitor source** of the default sink via PulseAudio (works on PipeWire through `pipewire-pulse`) | Use `libpulse-binding` or `pipewire` crate. Pick `@DEFAULT_MONITOR@`. |
+| **Windows** | WASAPI **loopback** on the default render device | Via `cpal`. `cpal` doesn't move a stream when the default device changes, so the backend detects the change itself and reopens. |
+| **Linux** | Monitor source of the default sink via PulseAudio (works on PipeWire through `pipewire-pulse`) | `@DEFAULT_MONITOR@`. |
 
 Also:
-- macOS is out of scope for v1 (see §10). Keep all OS-specific code behind the `AudioSource` trait and `#[cfg(target_os)]` so a macOS backend can drop in later.
-- Add a manual **input device picker** as a fallback on every OS. This also lets the user visualize a mic or line-in.
-- Downmix to mono for analysis, but keep stereo available (some visualizers use L/R separately).
-- Keep the audio thread lock-free: audio callback → ring buffer → analysis on the render thread (or its own thread).
+- Manual **input device picker**: in the overlay and via `--device`. A picked device lasts for that run only; every launch starts on the current default output.
+- Stereo is kept end to end. Analysis downmixes to mono, and the Stereo X/Y scope uses L/R.
+- Capture failures are shown on screen (and in the overlay) until capture recovers.
 
 ## 6. Audio analysis
 
-Compute these each frame and hand them to visualizers as a read-only `AudioFrame`:
+Computed each frame and handed to visualizers as a read-only `AudioFrame`:
 
-- **Waveform**: the latest ~1024–2048 samples (per channel).
-- **Spectrum**: FFT size 2048 with a Hann window, magnitudes in dB, plus a **log-spaced band set** (e.g. 32 / 64 / 128 bands) with smoothing (fast attack, slow decay) and peak-hold values.
+- **Waveform**: the latest samples per channel.
+- **Spectrum**: FFT size 2048 with a Hann window, magnitudes in dB, plus log-spaced bands with fast-attack/slow-decay smoothing and peak hold.
 - **Levels**: RMS, peak, and bass/mid/treble energy.
-- **Beat detection**: a simple energy-based onset detector on the bass band, giving a `beat: bool` plus `beat_intensity`. Tempo estimation is optional.
-- **Silence detection**: after N seconds of silence, fade to an idle animation.
+- **Beat detection**: an energy-based onset detector on the bass band, giving `beat` plus `beat_intensity`. No tempo estimation.
+- **Silence detection**: `AudioFrame::silent` turns on after a few seconds below ~-60 dBFS.
 
-Sensitivity/gain and smoothing are user settings.
+Sensitivity (3 dB steps) and smoothing are user settings.
+
+**As built:** instead of a separate idle animation, the picture **fades to black** over 3 s once `silent` turns on, and **fades back in** over 0.75 s when sound returns (and at launch). It can be turned off in the overlay (*Fade out when the music stops*). `silent` also drives keep-awake (§8).
 
 ## 7. Visualizers
 
@@ -80,50 +77,71 @@ Sensitivity/gain and smoothing are user settings.
 ```rust
 trait Visualizer {
     fn name(&self) -> &str;
-    fn init(&mut self, gpu: &GpuContext);
-    fn resize(&mut self, w: u32, h: u32);
+    fn resize(&mut self, device: &wgpu::Device, size: (u32, u32)) {}
     fn update(&mut self, audio: &AudioFrame, dt: f32);
-    fn render(&mut self, target: &RenderTarget);
+    fn configure(&mut self, settings: &Settings, rescan: bool) {}   // react to settings changes
+    fn step_preset(&mut self, direction: isize) -> Option<String> { None } // MilkDrop `[` / `]`
+    fn take_message(&mut self) -> Option<String> { None }           // on-screen notices
+    fn status(&self) -> Option<String> { None }
+    fn render(/* encoder, target, ... */);
 }
 ```
 
-- Registry of visualizers, cycled with the arrow keys or at random.
-- **Crossfade** of about 1 s when switching. Render both into offscreen textures and blend.
-- Shared helpers: a feedback buffer (draw the previous frame, zoomed/rotated/faded, under the current one, which is the key to the "old school" look), colour palette cycling, and post-processing (bloom/glow, optional CRT scanlines).
+- A registry (`viz::create_all`) and a `Switcher` cycle visualizers with the arrow keys or at random, skipping any the user has taken out of rotation.
+- About 1 s **crossfade** on every switch. Both visualizers render offscreen and are blended.
+- Shared helpers: a feedback buffer, colour palette cycling, a `Layered` base for the shader-driven visualizers, and post-FX (bloom, CRT scanlines) in the compositor.
 
-### Built-in set for v1 (originals, styled after the classics)
+### Built-in set (all done)
 
-1. **Bars & Peaks**: a classic spectrum analyser with falling peak caps. Variants: solid, segmented LED, mirrored.
-2. **Oscilloscope Wave**: a glowing waveform line with feedback trails. Variants: line, circular, stereo X/Y (Lissajous).
-3. **Ambient Swirl**: soft flowing colour fields driven by bass energy, with a feedback-buffer zoom/rotate.
-4. **Battery Rings**: concentric pulsing geometric rings and spokes whose radius and colour react to bands and beats.
-5. **Alchemy Particles**: a particle field that bursts on beats, with trails and additive blending.
-6. **Classic Lightshow**: iTunes-classic-style flowing ribbons and waveform blooms over a fading feedback trail.
-7. **Starfield Warp**: stars stream toward the viewer, with speed tied to energy and colour flashes on beats.
+1. **Bars & Peaks**, plus variants **LED Bars** and **Mirror Bars**.
+2. **Oscilloscope**, plus variants **Ring Scope** and **Stereo X/Y** (Lissajous).
+3. **Ambient Swirl**.
+4. **Battery Rings**.
+5. **Alchemy Particles**.
+6. **Classic Lightshow**.
+7. **Starfield Warp**.
 
-### MilkDrop via projectM (feature flag `milkdrop`)
+The variants come after the seven main visualizers in the rotation order, giving 11 entries in total (12 with MilkDrop).
 
-- Wrap projectM as one more `Visualizer`. Feed it PCM and render to the wgpu surface (projectM uses OpenGL, so either share a GL context or render it to a texture and copy it across. Pick whichever is simplest. Running a separate GL window in "MilkDrop mode" is acceptable for v1).
-- Ship with a small curated preset pack (check the licence; the projectM "cream of the crop" pack is a good start), and let the user point at their own preset folder.
-- If this turns into a time sink, defer it to v1.1. The built-in visualizers are the core.
+### MilkDrop via projectM (feature `milkdrop`)
+
+MilkDrop is required on **both Windows and Linux** for v1.
+
+**As built (Linux done, Windows to do):**
+
+- **Linux:** the feature is on by default. On Windows it currently does nothing (see §15). projectM renders on its own thread into a hidden OpenGL 3.3 context (an EGL pbuffer on a hardware GPU), and frames are uploaded as a wgpu texture. That makes MilkDrop an ordinary visualizer: crossfades, bloom and the overlay all work on top of it, and slow-loading presets don't freeze the app.
+- **No preset pack is bundled.** The user points neoViz at a folder (`--presets` or the overlay; `~` is expanded). The README recommends the projectM "cream of the crop" pack.
+- Shuffle (on by default), auto-change every 30 s (adjustable), `[` / `]` to step, and each new preset's name pops up.
+- projectM is LGPL-3.0 and linked statically. That's fine for personal use, but a distributed build must let recipients relink it. `--no-default-features` builds without it.
 
 ## 8. App behaviour and controls
 
 | Key | Action |
 |---|---|
 | `F` / double-click | Toggle full screen |
+| `F` `F` (double-tap) | **Span mode**: one window per monitor, one picture across them. `F` or `Esc` to leave |
 | `←` / `→` | Previous / next visualizer |
 | `R` | Toggle random mode (auto-switch every N seconds, and optionally on a strong beat) |
-| `Space` | Lock the current visualizer (pause auto-switch) |
+| `Space` | Lock the current visualizer (pause auto-switch, and MilkDrop's preset timer) |
 | `↑` / `↓` | Sensitivity up / down |
-| `Tab` | Show/hide the settings overlay (device, sensitivity, smoothing, auto-switch interval, which visualizers are in rotation, post-FX toggles, FPS counter) |
+| `Tab` | Settings overlay |
+| `B` / `C` | Toggle bloom / CRT scanlines |
+| `[` / `]` | Previous / next MilkDrop preset |
+| `D` | Analysis debug view |
 | `Esc` | Leave full screen, or quit when windowed |
+
+The settings overlay covers the device, sensitivity, smoothing, random mode, the auto-switch interval, switching on beats, which visualizers are in rotation, bloom, scanlines, the FPS counter, always-on-top, borderless, keep-awake, Motion, and the MilkDrop options.
 
 Also:
 - The current visualizer's name fades in for 2 s on switch.
-- Settings persist between runs.
-- Optional "always on top" and borderless window mode, so it can sit on a second monitor.
-- CLI flags: `--fullscreen`, `--monitor N`, `--visualizer <name>`, `--device <name>`.
+- Settings persist between runs (`settings.toml` in the OS config dir), except the audio device (see §5).
+- Optional "always on top" and borderless window mode.
+- CLI flags: `--fullscreen`, `--span`, `--monitor N`, `--visualizer <name>`, `--device <name>`, `--presets <dir>`, `--list-devices`.
+
+**Added beyond the original scope:**
+- **Span mode** across all monitors (above).
+- **Keep screen on** (*While music plays* / *Always* / *Off*). By default it stops the screen blanking or locking while there's sound, and lets the screen sleep after a minute of silence, like a video player.
+- **Motion** settings. *Speed* (0.25×–2×) slows the visualizers' own movement and colour cycling, and *Beat flashes* tones down the pulse on each beat. MilkDrop presets keep their own pace.
 
 ## 9. Performance and quality targets
 
@@ -132,73 +150,99 @@ Also:
 - Survives audio device changes, sleep/wake, and window resizes without crashing or a black screen.
 - Shows a clear on-screen message (not a crash) when capture fails or permission is denied.
 
+**As built:** all visual work is in WGSL shaders, capture reconnects on errors, and capture failures are shown on screen. The fps and CPU targets haven't been measured formally (see §15).
+
 ## 10. Stretch goals (post-v1)
 
-- **macOS support.** Primary: a **Core Audio process tap** (macOS 14.2+) tapping all system output. Fallback: **ScreenCaptureKit** audio-only capture (macOS 13+). Last resort: the user installs a virtual loopback device (e.g. BlackHole) and picks it as input. Expect a permission prompt; handle a denial with a clear on-screen message. Needs a small Objective-C/Swift shim or `objc2` bindings, an unsigned `.app` bundle, and a third CI target. Because rendering uses wgpu (Metal on macOS), the rest of the app should run unchanged.
-
+- **macOS support.** Primary: a **Core Audio process tap** (macOS 14.2+) tapping all system output. Fallback: **ScreenCaptureKit** audio-only capture (macOS 13+). Last resort: the user installs a virtual loopback device (e.g. BlackHole) and picks it as input. Expect a permission prompt, and handle a denial with a clear on-screen message. Needs a small Objective-C/Swift shim or `objc2` bindings, an unsigned `.app` bundle, and a third CI target. Because rendering uses wgpu (Metal on macOS), the rest of the app should run unchanged.
 - "Now playing" overlay via OS media APIs (Windows SMTC, Linux MPRIS, macOS MediaRemote/Now Playing).
 - Hot-reload of WGSL shaders from a user folder, so new visualizers can be written without recompiling.
 - A screensaver mode (Windows `.scr`).
 - Recording or exporting a clip to video.
 - Album-art-tinted colour palettes.
 
-## 11. Suggested project structure
+## 11. Project structure (as built)
 
 ```
 neoviz/
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs            # arg parsing, event loop
-│   ├── app.rs             # state, input handling, visualizer switching/crossfade
-│   ├── config.rs
+│   ├── main.rs              # CLI (clap), startup
+│   ├── app.rs               # winit event loop, window creation
+│   ├── app/
+│   │   ├── session.rs       # app state, switching, settings changes, span mode
+│   │   ├── layout.rs        # monitor layout for span mode
+│   │   └── awake.rs         # keep-screen-on policy
+│   ├── config.rs            # Settings, TOML persistence
+│   ├── input.rs             # key bindings
 │   ├── audio/
-│   │   ├── mod.rs         # AudioSource trait, ring buffer
-│   │   ├── windows.rs     # WASAPI loopback
-│   │   ├── linux.rs       # Pulse/PipeWire monitor
-│   │   ├── (macos.rs)     # later: Core Audio tap / ScreenCaptureKit
-│   │   └── analysis.rs    # FFT, bands, beat detection
+│   │   ├── mod.rs           # capture thread, ring buffer, reconnect
+│   │   ├── windows.rs       # WASAPI loopback (cpal)
+│   │   ├── linux.rs         # PulseAudio monitor source
+│   │   ├── analysis.rs      # FFT, levels, silence → AudioFrame
+│   │   ├── bands.rs         # log-spaced bands, smoothing, peaks
+│   │   └── beat.rs          # onset detection
 │   ├── render/
-│   │   ├── gpu.rs         # wgpu setup
-│   │   ├── feedback.rs    # feedback buffer helper
-│   │   └── postfx.rs      # bloom, scanlines
+│   │   ├── gpu.rs           # wgpu setup
+│   │   ├── compositor.rs    # crossfade, bloom, scanlines
+│   │   ├── feedback.rs      # feedback buffer
+│   │   ├── layer.rs, lines.rs, streaks.rs, present.rs, common.rs
+│   │   ├── debug_view.rs    # `D` analysis view
+│   │   └── headless_gl.rs   # hidden EGL/GL context for projectM
 │   ├── viz/
-│   │   ├── mod.rs         # Visualizer trait, registry
-│   │   ├── bars.rs
-│   │   ├── scope.rs
-│   │   ├── ambient.rs
-│   │   ├── rings.rs
-│   │   ├── particles.rs
-│   │   ├── lightshow.rs
-│   │   ├── starfield.rs
-│   │   └── milkdrop.rs    # #[cfg(feature = "milkdrop")]
-│   └── ui/overlay.rs      # egui
-└── shaders/*.wgsl
+│   │   ├── mod.rs           # Visualizer trait, registry, Switcher, AutoSwitch
+│   │   ├── bars.rs, scope.rs, particles.rs, lightshow.rs, starfield.rs
+│   │   ├── layered.rs       # Ambient Swirl, Battery Rings
+│   │   ├── color.rs, common.rs
+│   │   └── milkdrop/        # mod.rs, worker.rs (GL thread), presets.rs
+│   └── ui/                  # egui overlay and HUD
+├── shaders/*.wgsl (+ post/)
+├── packaging/linux/         # install.sh, .desktop, icon
+└── .github/workflows/       # ci.yml, release.yml
 ```
 
 ## 12. Milestones
 
-1. **Skeleton**: window, wgpu clear colour, full-screen toggle, CI building on Windows and Linux (GitHub Actions matrix).
-2. **Audio in**: Windows and Linux loopback working, with a debug view of the raw waveform and spectrum.
-3. **Analysis**: bands, smoothing, beat detection, plus a debug overlay.
-4. **First two visualizers**: Bars & Peaks and Oscilloscope Wave, plus switching and crossfade.
-5. **Remaining built-in visualizers**, the feedback buffer, and post-FX.
-6. **Settings overlay and persistence.**
-7. **projectM / MilkDrop** (feature-flagged).
-8. **Packaging**: Windows `.exe` (zip), Linux AppImage or plain binary.
+1. ✅ **Skeleton**: window, wgpu, full-screen toggle, CI on Windows and Linux (`d34334c`).
+2. ✅ **Audio in**: Windows and Linux loopback, debug view (`6a38ec3`).
+3. ✅ **Analysis**: bands, smoothing, beat and silence detection (`6538c82`).
+4. ✅ **First two visualizers**, switching and crossfade (`bf536c3`).
+5. ✅ **Remaining built-in visualizers**, feedback buffer, bloom and scanlines (`431fb76`).
+6. ✅ **Settings overlay, persistence and random mode** (`937e662`).
+7. 🟡 **projectM / MilkDrop**: Linux done (`3d9f2a9`, then fixes through `9926998`). Windows still to do (§15).
+8. ✅ **Packaging**: Linux tarball with `install.sh` and a desktop entry; Windows `.exe` zip; tag-triggered release workflow (`12fb3ed`). **v0.9.0** released 2026-11-13.
 9. *(Later)* **macOS**: see §10.
 
 ## 13. Acceptance criteria for v1
 
-- [ ] Play music in any app on Windows and Linux, launch the visualizer, and it reacts within a second with no configuration.
-- [ ] At least 5 built-in visualizers, switchable with the keyboard, with crossfades.
-- [ ] Full-screen and windowed modes both work, including on a second monitor.
-- [ ] Settings persist across restarts.
-- [ ] Unplugging headphones or changing the default output device doesn't kill the visuals.
-- [ ] A README covers build steps for Windows and Linux.
+- [x] Play music in any app on Windows and Linux, launch the visualizer, and it reacts within a second with no configuration. *(Default-output loopback on both. Needs a manual pass on Windows, see §15.)*
+- [x] At least 5 built-in visualizers, switchable with the keyboard, with crossfades. *(7, plus 4 variants.)*
+- [x] Full-screen and windowed modes both work, including on a second monitor. *(`--monitor N` and span mode.)*
+- [x] Settings persist across restarts.
+- [x] Unplugging headphones or changing the default output device doesn't kill the visuals. *(Reconnect logic on both backends. Needs a manual pass on Windows, see §15.)*
+- [x] A README covers build steps for Windows and Linux.
+- [ ] MilkDrop presets play on Windows and Linux, with the same controls and overlay options. *(Linux done; Windows is §15 item 1.)*
 
 ## 14. Notes for the implementer
 
 - **Do the audio capture early.** It's the riskiest part.
-- Don't build anything macOS-specific yet, but avoid choices that would block it later (e.g. no Windows-only or Linux-only rendering or UI code outside the audio backends).
+- Don't build anything macOS-specific yet, but avoid choices that would block it later (e.g. no Windows-only or Linux-only rendering or UI code outside the audio backends). *(MilkDrop's hidden GL context is the one other per-OS piece. Keep it behind `render/headless_gl.rs` so each OS has its own small backend there.)*
 - Prefer GPU shaders for all visual work, and keep visualizer code small and self-contained so adding a new one is a single file plus a shader.
 - Keep dependencies modest. Ask before pulling in a large framework (game engine, Electron, etc.).
+
+## 15. Remaining for 1.0
+
+1. **MilkDrop on Windows** (in progress):
+   - ✅ **GL context:** `render/headless_gl` now has a shared part (async readback) and one backend per OS: `egl.rs` (Linux) and `wgl.rs` (Windows). projectM always draws to framebuffer 0, so a framebuffer object won't work. The Windows backend uses a **WGL pbuffer**, bootstrapped through a hidden window with a throwaway legacy context.
+   - ✅ **GLEW:** projectM's Windows build calls OpenGL through GLEW but doesn't initialise it, so the worker calls `glewInit` after making the context current.
+   - ✅ **Gating:** `build.rs` sets `cfg(milkdrop)` when the feature is on and the OS is Linux or Windows. Dependencies are split per OS in `Cargo.toml`.
+   - ⏳ **Build:** `projectm-sys` 1.2.2's static Windows build can't link as published. It links `projectM-4`, but projectM names the file `libprojectM-4.lib`. It also never links GLEW, which vcpkg's manifest mode installs inside the build directory. It needs a patched `projectm-sys`.
+   - ⏳ **Compile check:** the Windows code hasn't been compiled yet (no Windows target on the dev machine). CI is the first check.
+   - ⏳ **CI and release:** build with MilkDrop in the Windows jobs (vcpkg is preinstalled on GitHub's Windows runners), and ship it in the Windows zip.
+   - ⏳ **Docs:** the README's MilkDrop section is still titled "MilkDrop presets (Linux)", and it needs the LGPL relinking note for the Windows zip.
+2. **Windows verification pass** on real hardware: zero-config start, unplugging headphones and changing the default device, sleep/wake, a second monitor, span mode, keep-awake, and MilkDrop.
+3. ✅ **Silence:** fade out when the music stops, and fade in when it returns (§6).
+4. ✅ **`Space` lock** now also stops MilkDrop's automatic preset changes. The timer restarts on unlock.
+5. **Performance check** against §9: 1080p at 60 fps on integrated graphics, and CPU use under 5%, with the FPS counter on.
+6. **README status line**: it still says "Packaging is next". Update it.
+7. **Release 1.0.0**: bump `version` in `Cargo.toml`, tag `v1.0.0`, and let the release workflow publish it.

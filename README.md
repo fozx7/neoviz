@@ -2,7 +2,7 @@
 
 A retro-style music visualizer for Windows and Linux. It listens to whatever your computer is playing (Spotify, a browser, a game) and draws full-screen visuals in the spirit of the mid-2000s media player visualizers. It doesn't play music itself.
 
-> **Status:** usable. Audio capture, all seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay, saved settings and optional MilkDrop presets (Linux) are in. Packaging is next. See [SCOPE.md](SCOPE.md) for the full plan.
+> **Status:** usable. Audio capture, all seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay, saved settings and optional MilkDrop presets are in. Packaging is next. See [SCOPE.md](SCOPE.md) for the full plan.
 
 ## Install
 
@@ -37,11 +37,14 @@ Install the PulseAudio client libraries (they also work on PipeWire via `pipewir
 
 ### Windows
 
-Nothing extra beyond the Rust toolchain (MSVC).
+The Rust toolchain (MSVC) is enough without MilkDrop (`--no-default-features`). For MilkDrop, see below.
 
-### MilkDrop presets (Linux)
+### MilkDrop presets
 
-On Linux, neoViz plays MilkDrop presets through [libprojectM](https://github.com/projectM-visualizer/projectm), built from source as part of the normal build (the first build takes ~30 s longer). You'll need `cmake`, a C++ compiler and the OpenGL/EGL headers (on Arch these come with `base-devel`, `cmake` and `mesa`; on Debian/Ubuntu: `cmake g++ libegl-dev libgl-dev`).
+neoViz plays MilkDrop presets through [libprojectM](https://github.com/projectM-visualizer/projectm), which is built from source as part of the normal build. The first build takes longer.
+
+- **Linux:** you need `cmake`, a C++ compiler and the OpenGL/EGL headers. On Arch these come with `base-devel`, `cmake` and `mesa`; on Debian/Ubuntu install `cmake g++ libegl-dev libgl-dev`.
+- **Windows:** you need Visual Studio 2022 (C++ workload), CMake, LLVM (for `libclang`), and [vcpkg](https://vcpkg.io) with `VCPKG_INSTALLATION_ROOT` pointing at it. vcpkg fetches GLEW by itself during the build. The repo carries a patched `projectm-sys` for this (see [vendor/README.md](vendor/README.md)).
 
 ```sh
 cargo run --release -- --presets ~/milkdrop-presets
@@ -78,7 +81,7 @@ You can also pick the device in the settings overlay (`Tab`).
 | `Esc` | Leave full screen, or quit when windowed |
 | `↑` / `↓` | Sensitivity up / down (3 dB steps) |
 | `R` | Toggle random mode (auto-switch every N seconds) |
-| `Space` | Lock the current visualizer (pause random mode) |
+| `Space` | Lock the current visualizer (pause random mode and MilkDrop preset changes) |
 | `Tab` | Settings overlay |
 | `B` | Toggle bloom |
 | `C` | Toggle CRT scanlines |
@@ -88,6 +91,8 @@ You can also pick the device in the settings overlay (`Tab`).
 Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy Particles, Classic Lightshow, Starfield Warp, then variants: LED Bars, Ring Scope, Mirror Bars, Stereo X/Y.
 
 **Keep screen on** (overlay → Display): by default neoViz stops the screen blanking or locking while music plays, like a video player, and lets it sleep after a minute of silence. Set it to *Always* or *Off* if you prefer.
+
+**Fade out when the music stops** (overlay → Display): after a couple of seconds of silence the picture fades to black, and it fades back in as soon as sound returns. Untick it to keep the visuals running in silence.
 
 Too fast or too flashy? In the overlay's **Motion** section, *Speed* slows the visualizers' own movement and colour cycling (0.25×–2×), and *Beat flashes* tones down the pulse on each beat. MilkDrop presets keep their own pace.
 

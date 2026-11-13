@@ -61,7 +61,7 @@ pub fn settings_panel(
                 ui.separator();
                 visualizer_section(ui, settings, info, &mut requests);
                 ui.separator();
-                if cfg!(all(feature = "milkdrop", target_os = "linux")) {
+                if cfg!(milkdrop) {
                     milkdrop_section(ui, settings, info, &mut requests);
                     ui.separator();
                 }

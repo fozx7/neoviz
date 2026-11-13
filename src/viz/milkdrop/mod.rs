@@ -5,6 +5,8 @@
 //! texture. That makes MilkDrop an ordinary visualizer: crossfades, bloom and
 //! the overlay all work on top of it.
 
+#[cfg(windows)]
+mod glew;
 mod presets;
 mod worker;
 

@@ -130,6 +130,11 @@ fn run(
             return;
         }
     };
+    #[cfg(windows)]
+    if let Err(e) = super::glew::init(&gl.gl) {
+        let _ = ready.send(Err(e));
+        return;
+    }
     // projectM needs its GL context current (on this thread) when created.
     let pm = ProjectM::create();
     pm.set_window_size(size.0 as usize, size.1 as usize);

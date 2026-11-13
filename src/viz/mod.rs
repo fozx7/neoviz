@@ -8,7 +8,7 @@ mod color;
 mod common;
 mod layered;
 mod lightshow;
-#[cfg(all(feature = "milkdrop", target_os = "linux"))]
+#[cfg(milkdrop)]
 mod milkdrop;
 mod particles;
 mod scope;
@@ -81,7 +81,7 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visual
         Box::new(lightshow::Lightshow::new(device, size)),
         Box::new(starfield::Starfield::new(device, size)),
     ];
-    #[cfg(all(feature = "milkdrop", target_os = "linux"))]
+    #[cfg(milkdrop)]
     match milkdrop::MilkDrop::new(device, size) {
         Ok(m) => all.push(Box::new(m)),
         Err(e) => log::error!("MilkDrop unavailable: {e:#}"),
