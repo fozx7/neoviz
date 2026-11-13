@@ -8,7 +8,7 @@ use winit::{
     dpi::PhysicalSize,
     event_loop::ActiveEventLoop,
     monitor::MonitorHandle,
-    window::{Fullscreen, Window, WindowId, WindowLevel},
+    window::{Fullscreen, UserAttentionType, Window, WindowId, WindowLevel},
 };
 
 use super::layout::{self, Rect};
@@ -248,6 +248,9 @@ impl Session {
 
     /// Back to one window, windowed.
     pub fn leave_span(&mut self) {
+        // Ask for focus first, while one of our windows still has it: closing
+        // the span windows otherwise hands focus to whatever app is behind them.
+        refocus(self.window());
         // Dropping the extra displays closes their windows.
         self.displays.truncate(1);
         self.slices = vec![WHOLE];
@@ -594,6 +597,23 @@ impl Session {
             Ok(()) => self.saved = self.settings.clone(),
             Err(e) => log::warn!("saving settings: {e:#}"),
         }
+    }
+}
+
+/// Gives the main window keyboard focus again.
+///
+/// Wayland doesn't let apps take focus; the polite route is an xdg-activation
+/// request (winit sends one for a user-attention request), which KWin grants
+/// when it comes from the app that has focus. Elsewhere, focus it directly.
+fn refocus(window: &Window) {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let wayland = window
+        .window_handle()
+        .is_ok_and(|h| matches!(h.as_raw(), RawWindowHandle::Wayland(_)));
+    if wayland {
+        window.request_user_attention(Some(UserAttentionType::Informational));
+    } else {
+        window.focus_window();
     }
 }
 
