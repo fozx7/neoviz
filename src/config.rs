@@ -15,6 +15,7 @@ const FILE_NAME: &str = "settings.toml";
 pub const SMOOTHING_RANGE: (f32, f32) = (0.03, 1.0);
 pub const AUTO_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
 pub const PRESET_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
+pub const SPEED_RANGE: (f32, f32) = (0.25, 2.0);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -48,6 +49,11 @@ pub struct Settings {
     pub preset_secs: f32,
     /// Play MilkDrop presets in random order (else folder order).
     pub preset_shuffle: bool,
+    /// Animation speed of the visualizers' own motion (rotation, colour
+    /// cycling, particles); 1.0 = normal. Doesn't slow the audio response.
+    pub speed: f32,
+    /// Strength of the colour flash on each beat, 0..1.
+    pub flash: f32,
 }
 
 impl Default for Settings {
@@ -70,6 +76,8 @@ impl Default for Settings {
             preset_auto: true,
             preset_secs: 30.0,
             preset_shuffle: true,
+            speed: 1.0,
+            flash: 1.0,
         }
     }
 }
@@ -85,6 +93,8 @@ impl Settings {
             .clamp(SMOOTHING_RANGE.0, SMOOTHING_RANGE.1);
         self.auto_switch_secs = finite_or(self.auto_switch_secs, d.auto_switch_secs)
             .clamp(AUTO_SWITCH_RANGE.0, AUTO_SWITCH_RANGE.1);
+        self.speed = finite_or(self.speed, d.speed).clamp(SPEED_RANGE.0, SPEED_RANGE.1);
+        self.flash = finite_or(self.flash, d.flash).clamp(0.0, 1.0);
         self.preset_secs = finite_or(self.preset_secs, d.preset_secs)
             .clamp(PRESET_SWITCH_RANGE.0, PRESET_SWITCH_RANGE.1);
         self
@@ -193,6 +203,23 @@ mod tests {
         assert_eq!(s.sensitivity_db, GAIN_LIMIT_DB);
         assert_eq!(s.smoothing_secs, SMOOTHING_RANGE.0);
         assert_eq!(s.auto_switch_secs, AUTO_SWITCH_RANGE.0);
+    }
+
+    #[test]
+    fn speed_and_flash_are_clamped() {
+        let s = Settings::from_toml("speed = 10.0\nflash = -0.5").unwrap();
+        assert_eq!(s.speed, SPEED_RANGE.1);
+        assert_eq!(s.flash, 0.0);
+        let s = Settings::from_toml("speed = 0.01\nflash = 3.0").unwrap();
+        assert_eq!(s.speed, SPEED_RANGE.0);
+        assert_eq!(s.flash, 1.0);
+    }
+
+    #[test]
+    fn old_settings_files_get_normal_speed_and_full_flash() {
+        let s = Settings::from_toml("bloom = true").unwrap();
+        assert_eq!(s.speed, 1.0);
+        assert_eq!(s.flash, 1.0);
     }
 
     #[test]

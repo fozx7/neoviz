@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
 
 use crate::{
     audio::{DeviceInfo, analysis::GAIN_LIMIT_DB},
-    config::{AUTO_SWITCH_RANGE, PRESET_SWITCH_RANGE, SMOOTHING_RANGE, Settings},
+    config::{AUTO_SWITCH_RANGE, PRESET_SWITCH_RANGE, SMOOTHING_RANGE, SPEED_RANGE, Settings},
 };
 
 use super::Toast;
@@ -61,6 +61,8 @@ pub fn settings_panel(
                     milkdrop_section(ui, settings, info, &mut requests);
                     ui.separator();
                 }
+                motion_section(ui, settings);
+                ui.separator();
                 display_section(ui, settings);
                 ui.separator();
                 footer(ui, info);
@@ -203,6 +205,29 @@ fn milkdrop_section(
         ui.label(format!("{name}: {status}"));
     }
     ui.small("[ / ] step through presets while MilkDrop is showing.");
+}
+
+fn motion_section(ui: &mut egui::Ui, settings: &mut Settings) {
+    ui.heading("Motion");
+    ui.add(
+        egui::Slider::new(&mut settings.speed, SPEED_RANGE.0..=SPEED_RANGE.1)
+            .text("Speed")
+            .suffix("×")
+            .logarithmic(true),
+    )
+    .on_hover_text("How fast visualizers move and cycle colours on their own. MilkDrop presets keep their own pace.");
+    let mut percent = settings.flash * 100.0;
+    if ui
+        .add(
+            egui::Slider::new(&mut percent, 0.0..=100.0)
+                .text("Beat flashes")
+                .suffix("%"),
+        )
+        .on_hover_text("Brightness pulses on each beat. Lower this if it's too flashy.")
+        .changed()
+    {
+        settings.flash = percent / 100.0;
+    }
 }
 
 fn display_section(ui: &mut egui::Ui, settings: &mut Settings) {

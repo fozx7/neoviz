@@ -16,7 +16,7 @@ use super::layout::{self, Rect};
 use crate::{
     audio::{
         self, Capture, DeviceInfo,
-        analysis::{Analyzer, GAIN_LIMIT_DB, GAIN_STEP_DB},
+        analysis::{Analyzer, AudioFrame, GAIN_LIMIT_DB, GAIN_STEP_DB},
         bands::BandSettings,
     },
     config::{self, Settings},
@@ -379,6 +379,13 @@ impl Session {
 
         let audio = self.analyzer.frame();
         let size = self.canvas.size();
+        // Visualizers see a scaled clock (Speed) and softened beats (Beat
+        // flashes); analysis, crossfades and the UI keep real time.
+        let motion_dt = dt * self.settings.speed;
+        let calmed = AudioFrame {
+            beat_intensity: audio.beat_intensity * self.settings.flash,
+            ..audio
+        };
         if self.show_debug {
             self.debug_view
                 .update(self.gpu.queue(), &audio, sample_rate, size, dt);
@@ -386,7 +393,7 @@ impl Session {
             self.switcher.advance(dt);
             let current = self.switcher.current();
             for index in std::iter::once(current).chain(self.switcher.outgoing()) {
-                self.visualizers[index].update(&audio, dt);
+                self.visualizers[index].update(&calmed, motion_dt);
             }
         }
         self.draw(size);
