@@ -96,7 +96,7 @@ impl App {
         }
 
         let window = Arc::new(event_loop.create_window(attrs).context("creating window")?);
-        let (gpu, main) = pollster::block_on(Gpu::new(window))?;
+        let (gpu, main) = pollster::block_on(Gpu::new(event_loop.owned_display_handle(), window))?;
         let visualizers = viz::create_all(gpu.device(), main.size());
         let names: Vec<&str> = visualizers.iter().map(|v| v.name()).collect();
         let start = match (&self.args.visualizer, &self.settings.visualizer) {

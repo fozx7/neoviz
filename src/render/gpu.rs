@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use winit::{dpi::PhysicalSize, window::Window};
+use winit::{dpi::PhysicalSize, event_loop::OwnedDisplayHandle, window::Window};
 
 pub struct Gpu {
     instance: wgpu::Instance,
@@ -33,9 +33,13 @@ pub struct Acquired {
 
 impl Gpu {
     /// Sets up the GPU for `window`, returning it as the first display.
-    pub async fn new(window: Arc<Window>) -> Result<(Self, Display)> {
+    ///
+    /// wgpu keeps the display handle for its whole lifetime, so it gets the
+    /// event loop's, not a window: holding a window would keep it open after
+    /// it's meant to close (e.g. when span mode ends).
+    pub async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> Result<(Self, Display)> {
         let instance = wgpu::Instance::new(
-            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(window.clone())),
+            wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(display)),
         );
         let surface = instance
             .create_surface(window.clone())
