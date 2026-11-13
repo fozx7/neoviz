@@ -20,7 +20,7 @@ use crate::{
     },
     input::{Action, DoubleClickDetector, action_for_key},
     render::{
-        compositor::{Compositor, INCOMING, OUTGOING},
+        compositor::{Compositor, INCOMING, OUTGOING, PostFx},
         debug_view::DebugView,
         gpu::Gpu,
     },
@@ -51,6 +51,7 @@ struct Running {
     compositor: Compositor,
     debug_view: DebugView,
     show_debug: bool,
+    post: PostFx,
     last_frame: Instant,
 }
 
@@ -81,14 +82,18 @@ impl Running {
                 self.visualizers[index].update(&audio, dt);
             }
 
-            let (visualizers, compositor, mix) =
-                (&mut self.visualizers, &self.compositor, self.switcher.mix());
+            let (visualizers, compositor, mix, post) = (
+                &mut self.visualizers,
+                &self.compositor,
+                self.switcher.mix(),
+                self.post,
+            );
             self.gpu.render(|queue, encoder, target| {
                 if let Some(index) = outgoing {
                     visualizers[index].render(queue, encoder, compositor.slot(OUTGOING), size);
                 }
                 visualizers[current].render(queue, encoder, compositor.slot(INCOMING), size);
-                compositor.draw(queue, encoder, target, mix);
+                compositor.draw(queue, encoder, target, mix, post);
             });
         }
         self.window.request_redraw();
@@ -169,6 +174,7 @@ impl App {
             analyzer: Analyzer::default(),
             visualizers,
             show_debug: false,
+            post: PostFx::default(),
             last_frame: Instant::now(),
             window,
             gpu,
@@ -204,6 +210,14 @@ impl App {
                 running.update_title();
             }
             Action::ToggleDebugView => running.show_debug = !running.show_debug,
+            Action::ToggleBloom => {
+                running.post.bloom = !running.post.bloom;
+                log::info!("bloom {}", on_off(running.post.bloom));
+            }
+            Action::ToggleScanlines => {
+                running.post.scanlines = !running.post.scanlines;
+                log::info!("scanlines {}", on_off(running.post.scanlines));
+            }
             Action::ToggleFullscreen => {
                 let next = match window.fullscreen() {
                     Some(_) => None,
@@ -277,6 +291,10 @@ fn pick_monitor(
             monitors.len()
         )
     })
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
 }
 
 /// Index of the visualizer called `wanted` (case-insensitive).

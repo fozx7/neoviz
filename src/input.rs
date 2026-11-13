@@ -17,6 +17,8 @@ pub enum Action {
     NextVisualizer,
     PreviousVisualizer,
     ToggleDebugView,
+    ToggleBloom,
+    ToggleScanlines,
 }
 
 /// Returns the action bound to a key press, if any.
@@ -28,6 +30,8 @@ pub fn action_for_key(key: &Key) -> Option<Action> {
         Key::Named(NamedKey::ArrowRight) => Some(Action::NextVisualizer),
         Key::Named(NamedKey::ArrowLeft) => Some(Action::PreviousVisualizer),
         Key::Character(c) if c.eq_ignore_ascii_case("d") => Some(Action::ToggleDebugView),
+        Key::Character(c) if c.eq_ignore_ascii_case("b") => Some(Action::ToggleBloom),
+        Key::Character(c) if c.eq_ignore_ascii_case("c") => Some(Action::ToggleScanlines),
         Key::Character(c) if c.eq_ignore_ascii_case("f") => Some(Action::ToggleFullscreen),
         _ => None,
     }
@@ -100,6 +104,18 @@ mod tests {
         assert_eq!(
             action_for_key(&Key::Character("D".into())),
             Some(Action::ToggleDebugView)
+        );
+    }
+
+    #[test]
+    fn b_and_c_toggle_post_effects() {
+        assert_eq!(
+            action_for_key(&Key::Character("b".into())),
+            Some(Action::ToggleBloom)
+        );
+        assert_eq!(
+            action_for_key(&Key::Character("C".into())),
+            Some(Action::ToggleScanlines)
         );
     }
 

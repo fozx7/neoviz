@@ -5,7 +5,12 @@
 
 mod bars;
 mod color;
+mod common;
+mod layered;
+mod lightshow;
+mod particles;
 mod scope;
+mod starfield;
 
 use crate::audio::analysis::AudioFrame;
 
@@ -33,13 +38,20 @@ pub trait Visualizer {
     );
 }
 
-/// Every built-in visualizer, in rotation order.
+/// Every built-in visualizer, in rotation order: the seven main ones first,
+/// then the alternate variants.
 pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visualizer>> {
     use bars::{Bars, BarsVariant};
+    use layered::{Kind, Layered};
     use scope::{Scope, ScopeVariant};
     vec![
         Box::new(Bars::new(device, BarsVariant::Solid)),
         Box::new(Scope::new(device, size, ScopeVariant::Line)),
+        Box::new(Layered::new(device, size, Kind::AmbientSwirl)),
+        Box::new(Layered::new(device, size, Kind::BatteryRings)),
+        Box::new(particles::Particles::new(device, size)),
+        Box::new(lightshow::Lightshow::new(device, size)),
+        Box::new(starfield::Starfield::new(device, size)),
         Box::new(Bars::new(device, BarsVariant::Led)),
         Box::new(Scope::new(device, size, ScopeVariant::Ring)),
         Box::new(Bars::new(device, BarsVariant::Mirror)),

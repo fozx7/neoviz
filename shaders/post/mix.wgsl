@@ -1,5 +1,4 @@
-// Crossfades the outgoing visualizer (a) into the incoming one (b) and writes
-// the result to the screen.
+// Crossfades the outgoing visualizer (a) into the incoming one (b), in HDR.
 
 struct Params {
     mix_amount: f32, // 0 = all a, 1 = all b
@@ -18,6 +17,5 @@ struct Params {
 fn fs(in: FullscreenOut) -> @location(0) vec4f {
     let ca = textureSample(a, samp, in.uv).rgb;
     let cb = textureSample(b, samp, in.uv).rgb;
-    let col = mix(ca, cb, p.mix_amount);
-    return vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 1.0);
+    return vec4f(mix(ca, cb, p.mix_amount), 1.0);
 }

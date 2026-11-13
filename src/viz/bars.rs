@@ -1,18 +1,17 @@
 //! Bars & Peaks: a classic spectrum analyser with falling peak caps.
 
 use crate::{
-    audio::{analysis::AudioFrame, bands::smoothing_coef},
-    render::common::{
-        DataTexture, HDR_FORMAT, Uniforms, draw_fullscreen, entry, fullscreen_pipeline,
-    },
+    audio::analysis::AudioFrame,
+    render::layer::{Blend, LayerParams, ShaderLayer},
 };
 
-use super::Visualizer;
+use super::{
+    Visualizer,
+    common::{BeatFlash, layer_params},
+};
 
 /// Bands drawn by the LED variant; chunky segments read better with fewer bars.
 const LED_BANDS: usize = 32;
-/// Widest band set any variant draws.
-const MAX_BANDS: u32 = 64;
 const FLASH_DECAY_SECS: f32 = 0.15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +30,7 @@ impl BarsVariant {
         }
     }
 
-    /// Value of the shader's `variant` uniform.
+    /// Value of the shader's `p.variant`.
     fn shader_id(self) -> f32 {
         match self {
             Self::Solid => 0.0,
@@ -43,56 +42,31 @@ impl BarsVariant {
 
 pub struct Bars {
     variant: BarsVariant,
-    pipeline: wgpu::RenderPipeline,
-    bind_group: wgpu::BindGroup,
-    params: Uniforms<8>,
-    data: DataTexture,
+    layer: ShaderLayer,
+    params: LayerParams,
     values: Vec<f32>,
     peaks: Vec<f32>,
+    scratch: Vec<f32>,
     time: f32,
-    flash: f32,
+    flash: BeatFlash,
 }
 
 impl Bars {
     pub fn new(device: &wgpu::Device, variant: BarsVariant) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("bars"),
-            entries: &[entry::uniform(0), entry::texture(1, false)],
-        });
-        let pipeline = fullscreen_pipeline(
-            device,
-            "bars",
-            include_str!("../../shaders/bars.wgsl"),
-            &[&layout],
-            HDR_FORMAT,
-            None,
-        );
-        let params = Uniforms::new(device, "bars params");
-        let data = DataTexture::new(device, "bars data", MAX_BANDS, 2);
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("bars"),
-            layout: &layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: params.buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&data.view),
-                },
-            ],
-        });
         Self {
             variant,
-            pipeline,
-            bind_group,
-            params,
-            data,
+            layer: ShaderLayer::new(
+                device,
+                "bars",
+                include_str!("../../shaders/bars.wgsl"),
+                Blend::Replace,
+            ),
+            params: LayerParams::default(),
             values: Vec::new(),
             peaks: Vec::new(),
+            scratch: Vec::new(),
             time: 0.0,
-            flash: 0.0,
+            flash: BeatFlash::new(FLASH_DECAY_SECS),
         }
     }
 }
@@ -104,18 +78,20 @@ impl Visualizer for Bars {
 
     fn update(&mut self, audio: &AudioFrame, dt: f32) {
         self.time += dt;
-        self.flash *= 1.0 - smoothing_coef(FLASH_DECAY_SECS, dt);
-        if audio.beat {
-            self.flash = self.flash.max(audio.beat_intensity);
-        }
+        let flash = self.flash.update(audio, dt);
+        self.params = LayerParams {
+            variant: self.variant.shader_id(),
+            ..layer_params(audio, self.params.size, self.time, dt, flash)
+        };
 
         let count = match self.variant {
             BarsVariant::Led => LED_BANDS,
             BarsVariant::Solid | BarsVariant::Mirror => audio.bands.len(),
         };
-        let peaks: Vec<f32> = audio.bands.peaks().collect();
         group_max(audio.bands.values(), count, &mut self.values);
-        group_max(&peaks, count, &mut self.peaks);
+        self.scratch.clear();
+        self.scratch.extend(audio.bands.peaks());
+        group_max(&self.scratch, count, &mut self.peaks);
     }
 
     fn render(
@@ -125,29 +101,10 @@ impl Visualizer for Bars {
         target: &wgpu::TextureView,
         size: (u32, u32),
     ) {
-        self.params.write(
-            queue,
-            [
-                size.0 as f32,
-                size.1 as f32,
-                self.values.len() as f32,
-                self.variant.shader_id(),
-                self.time,
-                self.flash,
-                0.0,
-                0.0,
-            ],
-        );
-        self.data.write_row(queue, 0, self.values.iter().copied());
-        self.data.write_row(queue, 1, self.peaks.iter().copied());
-        draw_fullscreen(
-            encoder,
-            "bars",
-            target,
-            true,
-            &self.pipeline,
-            &[&self.bind_group],
-        );
+        self.params.size = size;
+        self.layer
+            .set(queue, &self.params, &self.values, &self.peaks);
+        self.layer.draw(encoder, target);
     }
 }
 

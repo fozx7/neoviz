@@ -3,14 +3,18 @@
 use std::f32::consts::TAU;
 
 use crate::{
-    audio::{analysis::AudioFrame, bands::smoothing_coef},
+    audio::analysis::AudioFrame,
     render::{
         feedback::{Feedback, Warp},
         lines::{LineRenderer, LineStyle},
     },
 };
 
-use super::{Visualizer, color::hsv};
+use super::{
+    Visualizer,
+    color::hsv,
+    common::{AutoScale, BeatFlash},
+};
 
 /// Samples searched for a rising zero crossing to start the line on, so a
 /// steady tone stands still instead of jittering sideways.
@@ -18,15 +22,11 @@ const TRIGGER_SEARCH: usize = 256;
 /// Samples drawn by the line variant after the trigger point.
 const LINE_SAMPLES: usize = 768;
 /// The waveform is scaled so its recent peak reaches this height (y is -1..1).
-const TARGET_HEIGHT: f32 = 0.75;
-/// Quietest peak the auto-scaling will boost to full height (avoids blowing up noise).
-const MIN_LEVEL: f32 = 0.05;
-/// How fast the auto-scaling relaxes after a loud passage.
-const LEVEL_DECAY_SECS: f32 = 1.5;
+pub(super) const TARGET_HEIGHT: f32 = 0.75;
 const FLASH_DECAY_SECS: f32 = 0.2;
 /// Hue drift in full colour-wheel turns per second.
 const HUE_SPEED: f32 = 0.02;
-const RING_RADIUS: f32 = 0.5;
+pub(super) const RING_RADIUS: f32 = 0.5;
 const RING_AMPLITUDE: f32 = 0.3;
 /// Fraction of the screen width the line variant spans.
 const LINE_WIDTH: f32 = 0.95;
@@ -86,10 +86,9 @@ pub struct Scope {
     feedback: Feedback,
     points: Vec<[f32; 2]>,
     aspect: f32,
-    /// Recent waveform peak, for auto-scaling.
-    level: f32,
+    auto_scale: AutoScale,
     time: f32,
-    flash: f32,
+    flash: BeatFlash,
     dt: f32,
 }
 
@@ -102,16 +101,16 @@ impl Scope {
             feedback: Feedback::new(device, size),
             points: Vec::new(),
             aspect: aspect(size),
-            level: MIN_LEVEL,
+            auto_scale: AutoScale::default(),
             time: 0.0,
-            flash: 0.0,
+            flash: BeatFlash::new(FLASH_DECAY_SECS),
             dt: 0.0,
         }
     }
 
     fn style(&self) -> LineStyle {
         let hue = self.variant.base_hue() + self.time * HUE_SPEED;
-        let brightness = 0.8 + 0.7 * self.flash;
+        let brightness = 0.8 + 0.7 * self.flash.value();
         LineStyle {
             color: hsv(hue, 0.65, brightness),
             core_width: 0.0025,
@@ -133,14 +132,9 @@ impl Visualizer for Scope {
     fn update(&mut self, audio: &AudioFrame, dt: f32) {
         self.dt = dt;
         self.time += dt;
-        self.flash *= 1.0 - smoothing_coef(FLASH_DECAY_SECS, dt);
-        if audio.beat {
-            self.flash = self.flash.max(audio.beat_intensity);
-        }
+        self.flash.update(audio, dt);
 
-        let peak = audio.waveform.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-        self.level = peak.max(self.level * (1.0 - smoothing_coef(LEVEL_DECAY_SECS, dt)));
-        let scale = TARGET_HEIGHT / self.level.max(MIN_LEVEL);
+        let scale = self.auto_scale.update(audio.waveform, TARGET_HEIGHT, dt);
 
         self.points.clear();
         match self.variant {
@@ -188,7 +182,7 @@ fn line_points(wave: &[f32], scale: f32, aspect: f32, out: &mut Vec<[f32; 2]>) {
     }));
 }
 
-fn ring_points(wave: &[f32], scale: f32, out: &mut Vec<[f32; 2]>) {
+pub(super) fn ring_points(wave: &[f32], scale: f32, out: &mut Vec<[f32; 2]>) {
     let n = wave.len() as f32;
     out.extend(wave.iter().enumerate().map(|(i, s)| {
         let angle = TAU * i as f32 / n;
