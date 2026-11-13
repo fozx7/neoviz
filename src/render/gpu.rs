@@ -18,6 +18,15 @@ pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
+    ui_format: wgpu::TextureFormat,
+}
+
+/// Views of the frame being drawn.
+pub struct FrameTargets<'a> {
+    /// Surface format (usually sRGB): for the scene.
+    pub scene: &'a wgpu::TextureView,
+    /// [`Gpu::ui_format`]: for egui.
+    pub ui: &'a wgpu::TextureView,
 }
 
 impl Gpu {
@@ -62,6 +71,19 @@ impl Gpu {
         // FIFO = vsync: steady frame pacing and no tearing, supported everywhere.
         config.present_mode = wgpu::PresentMode::Fifo;
         config.desired_maximum_frame_latency = 1;
+        // egui blends in gamma space, so it wants a non-sRGB view of the frame.
+        // Where the backend can't reinterpret surface formats it shares the main one.
+        let plain = config.format.remove_srgb_suffix();
+        let can_reinterpret = adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS);
+        let ui_format = if plain != config.format && can_reinterpret {
+            config.view_formats.push(plain);
+            plain
+        } else {
+            config.format
+        };
         surface.configure(&device, &config);
 
         Ok(Self {
@@ -69,6 +91,7 @@ impl Gpu {
             device,
             queue,
             config,
+            ui_format,
         })
     }
 
@@ -93,6 +116,11 @@ impl Gpu {
         self.config.format
     }
 
+    /// Format of [`FrameTargets::ui`].
+    pub fn ui_format(&self) -> wgpu::TextureFormat {
+        self.ui_format
+    }
+
     /// Current surface size in physical pixels.
     pub fn size(&self) -> (u32, u32) {
         (self.config.width, self.config.height)
@@ -101,7 +129,7 @@ impl Gpu {
     /// Acquires the next frame, lets `draw` record into it, then presents it.
     pub fn render(
         &mut self,
-        draw: impl FnOnce(&wgpu::Queue, &mut wgpu::CommandEncoder, &wgpu::TextureView),
+        draw: impl FnOnce(&wgpu::Device, &wgpu::Queue, &mut wgpu::CommandEncoder, &FrameTargets),
     ) -> FrameStatus {
         let (frame, reconfigure) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -121,12 +149,20 @@ impl Gpu {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let ui_view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.ui_format),
+            ..Default::default()
+        });
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        draw(&self.queue, &mut encoder, &view);
+        let targets = FrameTargets {
+            scene: &view,
+            ui: &ui_view,
+        };
+        draw(&self.device, &self.queue, &mut encoder, &targets);
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
 

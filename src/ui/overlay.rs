@@ -1,0 +1,251 @@
+//! The settings panel (Tab) and the heads-up text.
+
+use std::path::Path;
+
+use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
+
+use crate::{
+    audio::{DeviceInfo, analysis::GAIN_LIMIT_DB},
+    config::{AUTO_SWITCH_RANGE, SMOOTHING_RANGE, Settings},
+};
+
+use super::Toast;
+
+/// What the panel needs to show besides the settings themselves.
+pub struct PanelInfo<'a> {
+    pub visualizers: &'a [&'a str],
+    pub current: usize,
+    pub devices: &'a [DeviceInfo],
+    pub device_list_error: Option<&'a str>,
+    pub capture_error: Option<&'a str>,
+    pub locked: bool,
+    pub config_path: Option<&'a Path>,
+}
+
+/// Things the user asked for in the panel that aren't plain settings.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PanelRequests {
+    /// Switch to this visualizer now.
+    pub select: Option<usize>,
+    pub refresh_devices: bool,
+    pub toggle_lock: bool,
+}
+
+const LOOPBACK_LABEL: &str = "Default output (what's playing)";
+
+/// Draws the settings window, editing `settings` in place. Sets `open` to
+/// false if the user closes it.
+pub fn settings_panel(
+    ctx: &egui::Context,
+    settings: &mut Settings,
+    info: &PanelInfo,
+    open: &mut bool,
+) -> PanelRequests {
+    let mut requests = PanelRequests::default();
+    egui::Window::new("neoViz settings")
+        .open(open)
+        .collapsible(false)
+        .resizable(false)
+        .default_pos([16.0, 16.0])
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                audio_section(ui, settings, info, &mut requests);
+                ui.separator();
+                visualizer_section(ui, settings, info, &mut requests);
+                ui.separator();
+                display_section(ui, settings);
+                ui.separator();
+                footer(ui, info);
+            });
+        });
+    requests
+}
+
+fn audio_section(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    info: &PanelInfo,
+    requests: &mut PanelRequests,
+) {
+    ui.heading("Audio");
+    ui.horizontal(|ui| {
+        let selected = match &settings.device {
+            None => LOOPBACK_LABEL.to_owned(),
+            Some(name) => info
+                .devices
+                .iter()
+                .find(|d| &d.name == name)
+                .map_or_else(|| name.clone(), |d| d.description.clone()),
+        };
+        egui::ComboBox::from_id_salt("device")
+            .selected_text(selected)
+            .width(320.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut settings.device, None, LOOPBACK_LABEL);
+                for d in info.devices {
+                    let kind = if d.is_loopback { "output" } else { "input" };
+                    let label = format!("{} ({kind})", d.description);
+                    ui.selectable_value(&mut settings.device, Some(d.name.clone()), label);
+                }
+            });
+        if ui.button("Refresh").clicked() {
+            requests.refresh_devices = true;
+        }
+    });
+    if let Some(err) = info.device_list_error {
+        ui.colored_label(Color32::LIGHT_RED, format!("Couldn't list devices: {err}"));
+    }
+    if let Some(err) = info.capture_error {
+        ui.colored_label(Color32::LIGHT_RED, format!("Not capturing: {err}"));
+    }
+    ui.add(
+        egui::Slider::new(&mut settings.sensitivity_db, -GAIN_LIMIT_DB..=GAIN_LIMIT_DB)
+            .text("Sensitivity")
+            .suffix(" dB")
+            .step_by(1.0),
+    );
+    ui.add(
+        egui::Slider::new(
+            &mut settings.smoothing_secs,
+            SMOOTHING_RANGE.0..=SMOOTHING_RANGE.1,
+        )
+        .text("Smoothing")
+        .suffix(" s")
+        .logarithmic(true),
+    );
+}
+
+fn visualizer_section(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    info: &PanelInfo,
+    requests: &mut PanelRequests,
+) {
+    ui.heading("Visualizers");
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut settings.random_mode, "Random mode");
+        let mut locked = info.locked;
+        if ui.checkbox(&mut locked, "Lock current").changed() {
+            requests.toggle_lock = true;
+        }
+    });
+    ui.add_enabled_ui(settings.random_mode, |ui| {
+        ui.add(
+            egui::Slider::new(
+                &mut settings.auto_switch_secs,
+                AUTO_SWITCH_RANGE.0..=AUTO_SWITCH_RANGE.1,
+            )
+            .text("Switch every")
+            .suffix(" s")
+            .logarithmic(true),
+        );
+        ui.checkbox(
+            &mut settings.switch_on_beat,
+            "Switch early on a strong beat",
+        );
+    });
+    ui.label("Tick to include in rotation; click a name to show it:");
+    for (i, name) in info.visualizers.iter().enumerate() {
+        ui.horizontal(|ui| {
+            let mut included = settings.is_in_rotation(name);
+            if ui.checkbox(&mut included, "").changed() {
+                settings.set_in_rotation(name, included);
+            }
+            if ui.selectable_label(i == info.current, *name).clicked() {
+                requests.select = Some(i);
+            }
+        });
+    }
+}
+
+fn display_section(ui: &mut egui::Ui, settings: &mut Settings) {
+    ui.heading("Display");
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut settings.bloom, "Bloom");
+        ui.checkbox(&mut settings.scanlines, "CRT scanlines");
+        ui.checkbox(&mut settings.show_fps, "FPS counter");
+    });
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut settings.always_on_top, "Always on top");
+        ui.checkbox(&mut settings.borderless, "Borderless window");
+    });
+}
+
+fn footer(ui: &mut egui::Ui, info: &PanelInfo) {
+    ui.small("←/→ switch · R random · Space lock · ↑/↓ sensitivity · F full screen · Tab close");
+    if let Some(path) = info.config_path {
+        ui.small(format!("Saved to {}", path.display()));
+    }
+}
+
+/// Text drawn straight onto the screen, outside any window.
+pub struct Hud<'a> {
+    pub toast: Option<&'a Toast>,
+    pub fps: Option<f32>,
+    pub capture_error: Option<&'a str>,
+}
+
+pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
+    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, Id::unique("hud")));
+    let screen = ctx.content_rect();
+
+    if let Some(toast) = hud.toast {
+        let pos = Pos2::new(screen.center().x, screen.bottom() - screen.height() * 0.08);
+        shadowed_text(
+            &painter,
+            pos,
+            Align2::CENTER_BOTTOM,
+            &toast.text,
+            32.0,
+            Color32::WHITE,
+            toast.alpha(),
+        );
+    }
+    if let Some(fps) = hud.fps {
+        let pos = Pos2::new(screen.right() - 12.0, screen.top() + 8.0);
+        let text = format!("{fps:.0} fps");
+        shadowed_text(
+            &painter,
+            pos,
+            Align2::RIGHT_TOP,
+            &text,
+            16.0,
+            Color32::LIGHT_GREEN,
+            1.0,
+        );
+    }
+    if let Some(err) = hud.capture_error {
+        let pos = Pos2::new(screen.center().x, screen.top() + 16.0);
+        let text = format!("No audio: {err}");
+        shadowed_text(
+            &painter,
+            pos,
+            Align2::CENTER_TOP,
+            &text,
+            18.0,
+            Color32::LIGHT_RED,
+            1.0,
+        );
+    }
+}
+
+fn shadowed_text(
+    painter: &egui::Painter,
+    pos: Pos2,
+    anchor: Align2,
+    text: &str,
+    size: f32,
+    color: Color32,
+    alpha: f32,
+) {
+    let font = FontId::proportional(size);
+    let shadow = Color32::from_black_alpha((200.0 * alpha) as u8);
+    painter.text(
+        pos + egui::vec2(2.0, 2.0),
+        anchor,
+        text,
+        font.clone(),
+        shadow,
+    );
+    painter.text(pos, anchor, text, font, color.gamma_multiply(alpha));
+}

@@ -191,13 +191,6 @@ impl Analyzer {
         }
     }
 
-    /// Nudges sensitivity by `delta_db`, clamped to ±[`GAIN_LIMIT_DB`]. Returns the new gain.
-    pub fn adjust_gain(&mut self, delta_db: f32) -> f32 {
-        self.settings.gain_db =
-            (self.settings.gain_db + delta_db).clamp(-GAIN_LIMIT_DB, GAIN_LIMIT_DB);
-        self.settings.gain_db
-    }
-
     /// The analysis from the last [`Analyzer::analyze`] call.
     pub fn frame(&self) -> AudioFrame<'_> {
         let levels = self.levels.values();
@@ -369,16 +362,9 @@ mod tests {
     #[test]
     fn gain_scales_levels() {
         let mut a = Analyzer::default();
-        a.adjust_gain(6.0);
+        a.settings.gain_db = 6.0;
         play(&mut a, 440.0, 0.25, 0.1);
         assert!((a.frame().peak - 0.5).abs() < 0.01);
-    }
-
-    #[test]
-    fn gain_is_clamped() {
-        let mut a = Analyzer::default();
-        assert_eq!(a.adjust_gain(100.0), GAIN_LIMIT_DB);
-        assert_eq!(a.adjust_gain(-1000.0), -GAIN_LIMIT_DB);
     }
 
     #[test]

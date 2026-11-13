@@ -1,130 +1,58 @@
-//! App state and the winit event loop handler.
+//! The winit event loop handler: creates the window and routes events to the
+//! [`Session`].
 
-use std::{sync::Arc, time::Instant};
+mod session;
+
+use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
+use session::{Outcome, Session};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition},
     event::{ElementState, MouseButton, WindowEvent},
     event_loop::ActiveEventLoop,
     monitor::MonitorHandle,
-    window::{Fullscreen, Window, WindowId},
+    window::{Fullscreen, Window, WindowId, WindowLevel},
 };
 
 use crate::{
     Args,
-    audio::{
-        Capture,
-        analysis::{Analyzer, GAIN_STEP_DB},
-    },
+    config::Settings,
     input::{Action, DoubleClickDetector, action_for_key},
-    render::{
-        compositor::{Compositor, INCOMING, OUTGOING, PostFx},
-        debug_view::DebugView,
-        gpu::Gpu,
-    },
-    viz::{self, Switcher, Visualizer},
+    render::gpu::Gpu,
+    viz,
 };
 
-const WINDOW_TITLE: &str = "neoViz";
 const DEFAULT_WINDOW_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 /// Offset from the chosen monitor's top-left corner when opening windowed.
 const WINDOW_MONITOR_OFFSET: i32 = 64;
-/// Longest frame time fed to the analysis, in seconds.
-const MAX_FRAME_DT: f32 = 0.1;
 
 pub struct App {
     args: Args,
-    running: Option<Running>,
+    /// Settings to start with (from disk, with command-line overrides applied).
+    settings: Settings,
+    /// What's on disk now, so unchanged settings aren't rewritten.
+    saved: Settings,
+    config_path: Option<PathBuf>,
+    session: Option<Session>,
     double_click: DoubleClickDetector,
     error: Option<anyhow::Error>,
 }
 
-struct Running {
-    window: Arc<Window>,
-    gpu: Gpu,
-    capture: Capture,
-    analyzer: Analyzer,
-    visualizers: Vec<Box<dyn Visualizer>>,
-    switcher: Switcher,
-    compositor: Compositor,
-    debug_view: DebugView,
-    show_debug: bool,
-    post: PostFx,
-    last_frame: Instant,
-}
-
-impl Running {
-    fn redraw(&mut self) {
-        let now = Instant::now();
-        // Clamp so a stall (e.g. dragging the window) doesn't cause a huge jump.
-        let dt = (now - self.last_frame).as_secs_f32().min(MAX_FRAME_DT);
-        self.last_frame = now;
-
-        let sample_rate = self.capture.sample_rate();
-        self.analyzer.ingest(&mut self.capture.consumer);
-        self.analyzer.analyze(sample_rate, dt);
-        let audio = self.analyzer.frame();
-        let size = self.gpu.size();
-
-        if self.show_debug {
-            self.debug_view
-                .update(self.gpu.queue(), &audio, sample_rate, size, dt);
-            let debug_view = &self.debug_view;
-            self.gpu
-                .render(|_, encoder, target| debug_view.draw(encoder, target));
-        } else {
-            self.switcher.advance(dt);
-            let current = self.switcher.current();
-            let outgoing = self.switcher.outgoing();
-            for index in std::iter::once(current).chain(outgoing) {
-                self.visualizers[index].update(&audio, dt);
-            }
-
-            let (visualizers, compositor, mix, post) = (
-                &mut self.visualizers,
-                &self.compositor,
-                self.switcher.mix(),
-                self.post,
-            );
-            self.gpu.render(|queue, encoder, target| {
-                if let Some(index) = outgoing {
-                    visualizers[index].render(queue, encoder, compositor.slot(OUTGOING), size);
-                }
-                visualizers[current].render(queue, encoder, compositor.slot(INCOMING), size);
-                compositor.draw(queue, encoder, target, mix, post);
-            });
-        }
-        self.window.request_redraw();
-    }
-
-    fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
-        self.gpu.resize(size);
-        let size = self.gpu.size();
-        self.compositor.resize(self.gpu.device(), size);
-        for v in &mut self.visualizers {
-            v.resize(self.gpu.device(), size);
-        }
-    }
-
-    fn update_title(&self) {
-        let name = self.visualizers[self.switcher.current()].name();
-        let mut title = format!("{WINDOW_TITLE} · {name}");
-        let gain = self.analyzer.settings.gain_db;
-        // Until the on-screen overlay exists, the title bar shows this.
-        if gain != 0.0 {
-            title.push_str(&format!(" · sensitivity {gain:+} dB"));
-        }
-        self.window.set_title(&title);
-    }
-}
-
 impl App {
-    pub fn new(args: Args) -> Self {
+    pub fn new(args: Args, saved: Settings, config_path: Option<PathBuf>) -> Self {
+        let mut settings = saved.clone();
+        // Command-line choices act like picking them in the settings panel.
+        if args.device.is_some() {
+            settings.device = args.device.clone();
+        }
         Self {
             args,
-            running: None,
+            settings,
+            saved,
+            config_path,
+            session: None,
             double_click: DoubleClickDetector::default(),
             error: None,
         }
@@ -141,11 +69,15 @@ impl App {
         event_loop.exit();
     }
 
-    fn start(&self, event_loop: &ActiveEventLoop) -> Result<Running> {
+    fn start(&self, event_loop: &ActiveEventLoop) -> Result<Session> {
         let monitor = pick_monitor(event_loop, self.args.monitor)?;
         let mut attrs = Window::default_attributes()
-            .with_title(WINDOW_TITLE)
-            .with_inner_size(DEFAULT_WINDOW_SIZE);
+            .with_title("neoViz")
+            .with_inner_size(DEFAULT_WINDOW_SIZE)
+            .with_decorations(!self.settings.borderless);
+        if self.settings.always_on_top {
+            attrs = attrs.with_window_level(WindowLevel::AlwaysOnTop);
+        }
         if let Some(m) = &monitor {
             let p = m.position();
             attrs = attrs.with_position(PhysicalPosition::new(
@@ -159,119 +91,86 @@ impl App {
 
         let window = Arc::new(event_loop.create_window(attrs).context("creating window")?);
         let gpu = pollster::block_on(Gpu::new(window.clone()))?;
-        let size = gpu.size();
-        let visualizers = viz::create_all(gpu.device(), size);
+        let visualizers = viz::create_all(gpu.device(), gpu.size());
         let names: Vec<&str> = visualizers.iter().map(|v| v.name()).collect();
-        let start = match &self.args.visualizer {
-            Some(wanted) => find_by_name(&names, wanted)?,
-            None => 0,
+        let start = match (&self.args.visualizer, &self.settings.visualizer) {
+            // An explicit --visualizer must exist; a remembered one may have been renamed.
+            (Some(wanted), _) => find_by_name(&names, wanted)?,
+            (None, Some(last)) => find_by_name(&names, last).unwrap_or(0),
+            (None, None) => 0,
         };
-        let running = Running {
-            switcher: Switcher::new(visualizers.len(), start),
-            compositor: Compositor::new(gpu.device(), gpu.surface_format(), size),
-            debug_view: DebugView::new(gpu.device(), gpu.surface_format()),
-            capture: Capture::start(self.args.device.clone())?,
-            analyzer: Analyzer::default(),
-            visualizers,
-            show_debug: false,
-            post: PostFx::default(),
-            last_frame: Instant::now(),
+        Session::new(
             window,
             gpu,
-        };
-        running.update_title();
-        running.window.request_redraw();
-        Ok(running)
-    }
-
-    fn apply(&mut self, action: Action, event_loop: &ActiveEventLoop) {
-        let Some(running) = &mut self.running else {
-            return;
-        };
-        let window = &running.window;
-        match action {
-            Action::SensitivityUp | Action::SensitivityDown => {
-                let step = if action == Action::SensitivityUp {
-                    GAIN_STEP_DB
-                } else {
-                    -GAIN_STEP_DB
-                };
-                let gain = running.analyzer.adjust_gain(step);
-                log::info!("sensitivity {gain:+} dB");
-                running.update_title();
-            }
-            Action::NextVisualizer | Action::PreviousVisualizer => {
-                if action == Action::NextVisualizer {
-                    running.switcher.next();
-                } else {
-                    running.switcher.previous();
-                }
-                running.show_debug = false;
-                running.update_title();
-            }
-            Action::ToggleDebugView => running.show_debug = !running.show_debug,
-            Action::ToggleBloom => {
-                running.post.bloom = !running.post.bloom;
-                log::info!("bloom {}", on_off(running.post.bloom));
-            }
-            Action::ToggleScanlines => {
-                running.post.scanlines = !running.post.scanlines;
-                log::info!("scanlines {}", on_off(running.post.scanlines));
-            }
-            Action::ToggleFullscreen => {
-                let next = match window.fullscreen() {
-                    Some(_) => None,
-                    None => Some(Fullscreen::Borderless(window.current_monitor())),
-                };
-                window.set_fullscreen(next);
-            }
-            Action::Escape if window.fullscreen().is_some() => window.set_fullscreen(None),
-            Action::Escape => event_loop.exit(),
-        }
+            visualizers,
+            start,
+            self.settings.clone(),
+            self.saved.clone(),
+            self.config_path.clone(),
+        )
     }
 }
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.running.is_some() {
+        if self.session.is_some() {
             return;
         }
         match self.start(event_loop) {
-            Ok(running) => self.running = Some(running),
+            Ok(session) => self.session = Some(session),
             Err(err) => self.fail(event_loop, err),
         }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+        let Some(session) = &mut self.session else {
+            return;
+        };
+        let ui_used = session.ui_event(&event);
+
+        let action = match &event {
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+                return;
+            }
             WindowEvent::Resized(size) => {
-                if let Some(r) = &mut self.running {
-                    r.resize(size);
-                }
+                session.resize(*size);
+                return;
+            }
+            WindowEvent::RedrawRequested => {
+                session.redraw();
+                return;
             }
             WindowEvent::KeyboardInput { event, .. }
                 if event.state == ElementState::Pressed && !event.repeat =>
             {
-                if let Some(action) = action_for_key(&event.logical_key) {
-                    self.apply(action, event_loop);
-                }
+                action_for_key(&event.logical_key)
+                    // While typing in the UI, only the keys that close it still work.
+                    .filter(|a| {
+                        !session.ui_wants_keyboard()
+                            || matches!(a, Action::ToggleSettings | Action::Escape)
+                    })
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
-            } => {
-                if self.double_click.click(Instant::now()) {
-                    self.apply(Action::ToggleFullscreen, event_loop);
-                }
-            }
-            WindowEvent::RedrawRequested => {
-                if let Some(r) = &mut self.running {
-                    r.redraw();
-                }
-            }
-            _ => {}
+            } if !ui_used => self
+                .double_click
+                .click(Instant::now())
+                .then_some(Action::ToggleFullscreen),
+            _ => None,
+        };
+        if let Some(action) = action
+            && session.apply(action) == Outcome::Quit
+        {
+            event_loop.exit();
+        }
+    }
+
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(session) = &mut self.session {
+            session.save();
         }
     }
 }
@@ -291,10 +190,6 @@ fn pick_monitor(
             monitors.len()
         )
     })
-}
-
-fn on_off(on: bool) -> &'static str {
-    if on { "on" } else { "off" }
 }
 
 /// Index of the visualizer called `wanted` (case-insensitive).

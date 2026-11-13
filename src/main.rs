@@ -1,7 +1,9 @@
 mod app;
 mod audio;
+mod config;
 mod input;
 mod render;
+mod ui;
 mod viz;
 
 use clap::Parser;
@@ -28,19 +30,40 @@ pub struct Args {
     /// Visualizer to start with (case-insensitive name, e.g. "ring scope").
     #[arg(long, value_name = "NAME")]
     pub visualizer: Option<String>,
+
+    /// Print the audio devices that can be captured, then exit.
+    #[arg(long)]
+    pub list_devices: bool,
 }
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let args = Args::parse();
+    if args.list_devices {
+        return print_devices();
+    }
 
     let event_loop = EventLoop::new()?;
     // Rendering is paced by vsync (FIFO present mode), so poll continuously.
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = app::App::new(args);
+    let config_path = config::default_path();
+    let settings = config_path.as_deref().map(config::load).unwrap_or_default();
+    if let Some(path) = &config_path {
+        log::info!("settings: {}", path.display());
+    }
+
+    let mut app = app::App::new(args, settings, config_path);
     event_loop.run_app(&mut app)?;
     app.exit_result()
+}
+
+fn print_devices() -> anyhow::Result<()> {
+    for d in audio::list_devices()? {
+        let kind = if d.is_loopback { "output" } else { "input " };
+        println!("{kind}  {}\n        --device \"{}\"", d.description, d.name);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

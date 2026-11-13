@@ -47,6 +47,26 @@ pub struct CaptureContext {
     /// Only the capture callback locks this, and only one stream is live at a
     /// time, so `try_lock` never contends in practice.
     producer: Mutex<rtrb::Producer<f32>>,
+    /// Why capture isn't working right now, for showing on screen.
+    error: Mutex<Option<String>>,
+}
+
+/// A device that can be captured.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceInfo {
+    /// What `--device` / the settings file expect.
+    pub name: String,
+    /// Human-readable label.
+    pub description: String,
+    /// True for an output captured in loopback (vs a mic or line-in).
+    pub is_loopback: bool,
+}
+
+/// Devices available for capture, loopback outputs first.
+pub fn list_devices() -> Result<Vec<DeviceInfo>> {
+    let mut devices = backend::list_devices()?;
+    devices.sort_by_key(|d| !d.is_loopback);
+    Ok(devices)
 }
 
 impl CaptureContext {
@@ -69,6 +89,19 @@ impl CaptureContext {
             return;
         };
         push_as_stereo(&mut producer, data, channels);
+    }
+
+    /// Records why capture failed (shown on screen until it recovers).
+    pub fn set_error(&self, message: String) {
+        if let Ok(mut e) = self.error.lock() {
+            *e = Some(message);
+        }
+    }
+
+    pub fn clear_error(&self) {
+        if let Ok(mut e) = self.error.lock() {
+            *e = None;
+        }
     }
 
     /// Sleeps for `duration`, waking early if a stop is requested.
@@ -96,6 +129,7 @@ impl Capture {
             stop: AtomicBool::new(false),
             sample_rate: AtomicU32::new(DEFAULT_SAMPLE_RATE),
             producer: Mutex::new(producer),
+            error: Mutex::new(None),
         });
         let thread_ctx = ctx.clone();
         let thread = std::thread::Builder::new()
@@ -111,6 +145,11 @@ impl Capture {
 
     pub fn sample_rate(&self) -> u32 {
         self.ctx.sample_rate.load(Ordering::Relaxed)
+    }
+
+    /// Why capture currently isn't working, if it isn't.
+    pub fn error(&self) -> Option<String> {
+        self.ctx.error.lock().ok().and_then(|e| e.clone())
     }
 }
 
@@ -132,8 +171,12 @@ use windows as backend;
 
 #[cfg(not(any(target_os = "linux", windows)))]
 mod backend {
-    pub fn run(_ctx: std::sync::Arc<super::CaptureContext>) {
-        log::error!("audio capture is not implemented on this OS yet");
+    pub fn run(ctx: std::sync::Arc<super::CaptureContext>) {
+        ctx.set_error("audio capture is not implemented on this OS yet".into());
+    }
+
+    pub fn list_devices() -> anyhow::Result<Vec<super::DeviceInfo>> {
+        Ok(Vec::new())
     }
 }
 

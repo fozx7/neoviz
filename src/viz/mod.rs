@@ -14,6 +14,8 @@ mod starfield;
 
 use crate::audio::analysis::AudioFrame;
 
+pub use common::Rng;
+
 /// How long a crossfade between visualizers lasts.
 pub const CROSSFADE_SECS: f32 = 1.0;
 
@@ -98,12 +100,27 @@ impl Switcher {
         self.fade.map_or(1.0, |f| smoothstep(f.progress))
     }
 
-    pub fn next(&mut self) {
-        self.select((self.current + 1) % self.count);
+    /// Moves `direction` (+1 next, -1 previous) to the nearest visualizer in
+    /// rotation. `in_rotation[i]` says whether visualizer `i` is included;
+    /// if none are, all are.
+    pub fn step(&mut self, direction: isize, in_rotation: &[bool]) {
+        let n = self.count as isize;
+        let target = (1..n)
+            .map(|k| (self.current as isize + direction.signum() * k).rem_euclid(n) as usize)
+            .find(|&i| is_included(in_rotation, i));
+        if let Some(i) = target {
+            self.select(i);
+        }
     }
 
-    pub fn previous(&mut self) {
-        self.select((self.current + self.count - 1) % self.count);
+    /// Switches to a random visualizer in rotation other than the current one.
+    pub fn random(&mut self, in_rotation: &[bool], rng: &mut Rng) {
+        let choices: Vec<usize> = (0..self.count)
+            .filter(|&i| i != self.current && is_included(in_rotation, i))
+            .collect();
+        if !choices.is_empty() {
+            self.select(choices[rng.next_u32() as usize % choices.len()]);
+        }
     }
 
     /// Starts a crossfade to `index`. Switching mid-fade fades from whatever
@@ -129,6 +146,41 @@ impl Switcher {
     }
 }
 
+fn is_included(in_rotation: &[bool], index: usize) -> bool {
+    !in_rotation.iter().any(|&on| on) || in_rotation.get(index).copied().unwrap_or(false)
+}
+
+/// Beat intensity that counts as "strong" for switching early.
+pub const STRONG_BEAT: f32 = 0.8;
+
+/// Decides when random mode switches visualizer.
+#[derive(Debug, Clone, Default)]
+pub struct AutoSwitch {
+    elapsed: f32,
+}
+
+impl AutoSwitch {
+    /// Restarts the countdown (e.g. after a manual switch).
+    pub fn reset(&mut self) {
+        self.elapsed = 0.0;
+    }
+
+    /// Advances by `dt`. Returns true when it's time to switch: after
+    /// `interval` seconds, or (with `on_beat`) on a strong beat once at least
+    /// half the interval has passed.
+    pub fn tick(&mut self, dt: f32, interval: f32, on_beat: bool, beat: Option<f32>) -> bool {
+        self.elapsed += dt;
+        let strong_beat = on_beat
+            && self.elapsed >= interval * 0.5
+            && beat.is_some_and(|intensity| intensity >= STRONG_BEAT);
+        let due = self.elapsed >= interval || strong_beat;
+        if due {
+            self.elapsed = 0.0;
+        }
+        due
+    }
+}
+
 fn smoothstep(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -146,20 +198,58 @@ mod tests {
         assert_eq!(s.mix(), 1.0);
     }
 
+    const ALL: [bool; 0] = [];
+
     #[test]
     fn next_and_previous_wrap() {
         let mut s = Switcher::new(3, 2);
-        s.next();
+        s.step(1, &ALL);
         assert_eq!(s.current(), 0);
-        s.previous();
-        s.previous();
+        s.step(-1, &ALL);
+        s.step(-1, &ALL);
         assert_eq!(s.current(), 1);
+    }
+
+    #[test]
+    fn stepping_skips_visualizers_out_of_rotation() {
+        let mut s = Switcher::new(4, 0);
+        let rotation = [true, false, false, true];
+        s.step(1, &rotation);
+        assert_eq!(s.current(), 3);
+        s.step(1, &rotation);
+        assert_eq!(s.current(), 0);
+    }
+
+    #[test]
+    fn empty_rotation_means_everything() {
+        let mut s = Switcher::new(3, 0);
+        s.step(1, &[false, false, false]);
+        assert_eq!(s.current(), 1);
+    }
+
+    #[test]
+    fn random_picks_another_one_in_rotation() {
+        let mut rng = Rng::new(3);
+        let rotation = [true, false, true, true];
+        for _ in 0..50 {
+            let mut s = Switcher::new(4, 0);
+            s.random(&rotation, &mut rng);
+            assert!(s.current() == 2 || s.current() == 3);
+        }
+    }
+
+    #[test]
+    fn random_with_nothing_else_stays_put() {
+        let mut s = Switcher::new(3, 1);
+        s.random(&[false, true, false], &mut Rng::new(1));
+        assert_eq!(s.current(), 1);
+        assert_eq!(s.outgoing(), None);
     }
 
     #[test]
     fn switching_crossfades_over_one_second() {
         let mut s = Switcher::new(3, 0);
-        s.next();
+        s.step(1, &ALL);
         assert_eq!(s.outgoing(), Some(0));
         assert_eq!(s.mix(), 0.0);
 
@@ -174,9 +264,9 @@ mod tests {
     #[test]
     fn switching_mid_fade_restarts_from_the_previous_target() {
         let mut s = Switcher::new(4, 0);
-        s.next(); // 0 -> 1
+        s.step(1, &ALL); // 0 -> 1
         s.advance(0.3);
-        s.next(); // 1 -> 2
+        s.step(1, &ALL); // 1 -> 2
         assert_eq!(s.current(), 2);
         assert_eq!(s.outgoing(), Some(1));
         assert_eq!(s.mix(), 0.0);
@@ -193,7 +283,35 @@ mod tests {
     #[test]
     fn single_visualizer_never_fades() {
         let mut s = Switcher::new(1, 0);
-        s.next();
+        s.step(1, &ALL);
         assert_eq!(s.outgoing(), None);
+    }
+
+    #[test]
+    fn auto_switch_fires_after_the_interval() {
+        let mut a = AutoSwitch::default();
+        assert!(!a.tick(9.0, 10.0, false, None));
+        assert!(a.tick(1.0, 10.0, false, None));
+        assert!(!a.tick(1.0, 10.0, false, None), "countdown restarts");
+    }
+
+    #[test]
+    fn strong_beats_switch_early_but_not_too_early() {
+        let mut a = AutoSwitch::default();
+        assert!(
+            !a.tick(2.0, 10.0, true, Some(1.0)),
+            "before half the interval"
+        );
+        assert!(
+            !a.tick(4.0, 10.0, true, Some(STRONG_BEAT - 0.1)),
+            "weak beat"
+        );
+        assert!(a.tick(0.0, 10.0, true, Some(STRONG_BEAT)));
+    }
+
+    #[test]
+    fn beats_are_ignored_unless_enabled() {
+        let mut a = AutoSwitch::default();
+        assert!(!a.tick(6.0, 10.0, false, Some(1.0)));
     }
 }

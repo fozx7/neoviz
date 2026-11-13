@@ -15,7 +15,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-use super::{CaptureContext, RETRY_DELAY};
+use super::{CaptureContext, DeviceInfo, RETRY_DELAY};
 
 /// How often the supervisor checks for a stop request while the stream runs.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -24,6 +24,7 @@ pub fn run(ctx: Arc<CaptureContext>) {
     while !ctx.should_stop() {
         if let Err(err) = capture_until_stopped(&ctx) {
             log::warn!("audio capture: {err:#}; retrying in {RETRY_DELAY:?}");
+            ctx.set_error(format!("{err:#}"));
             ctx.sleep(RETRY_DELAY);
         }
     }
@@ -66,6 +67,7 @@ fn capture_until_stopped(ctx: &Arc<CaptureContext>) -> Result<()> {
     stream.play().with_context(|| format!("starting {name}"))?;
 
     ctx.set_sample_rate(sample_rate);
+    ctx.clear_error();
     log::info!("capturing from {name} at {sample_rate} Hz, {channels} ch");
 
     loop {
@@ -100,4 +102,20 @@ fn find_device(host: &cpal::Host, name: Option<&str>) -> Result<cpal::Device> {
         .context("listing audio devices")?
         .find(|d| d.to_string() == name)
         .with_context(|| format!("no audio device named {name:?}"))
+}
+
+/// Lists output devices (captured as loopback) and input devices.
+pub fn list_devices() -> Result<Vec<DeviceInfo>> {
+    let host = cpal::default_host();
+    let devices = host.devices().context("listing audio devices")?;
+    Ok(devices
+        .map(|d| {
+            let name = d.to_string();
+            DeviceInfo {
+                description: name.clone(),
+                is_loopback: d.supports_output(),
+                name,
+            }
+        })
+        .collect())
 }

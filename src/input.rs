@@ -19,6 +19,10 @@ pub enum Action {
     ToggleDebugView,
     ToggleBloom,
     ToggleScanlines,
+    ToggleRandom,
+    /// Pause random switching on the current visualizer.
+    ToggleLock,
+    ToggleSettings,
 }
 
 /// Returns the action bound to a key press, if any.
@@ -32,6 +36,9 @@ pub fn action_for_key(key: &Key) -> Option<Action> {
         Key::Character(c) if c.eq_ignore_ascii_case("d") => Some(Action::ToggleDebugView),
         Key::Character(c) if c.eq_ignore_ascii_case("b") => Some(Action::ToggleBloom),
         Key::Character(c) if c.eq_ignore_ascii_case("c") => Some(Action::ToggleScanlines),
+        Key::Character(c) if c.eq_ignore_ascii_case("r") => Some(Action::ToggleRandom),
+        Key::Named(NamedKey::Space) => Some(Action::ToggleLock),
+        Key::Named(NamedKey::Tab) => Some(Action::ToggleSettings),
         Key::Character(c) if c.eq_ignore_ascii_case("f") => Some(Action::ToggleFullscreen),
         _ => None,
     }
@@ -116,6 +123,22 @@ mod tests {
         assert_eq!(
             action_for_key(&Key::Character("C".into())),
             Some(Action::ToggleScanlines)
+        );
+    }
+
+    #[test]
+    fn random_lock_and_settings_keys() {
+        assert_eq!(
+            action_for_key(&Key::Character("R".into())),
+            Some(Action::ToggleRandom)
+        );
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::Space)),
+            Some(Action::ToggleLock)
+        );
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::Tab)),
+            Some(Action::ToggleSettings)
         );
     }
 
