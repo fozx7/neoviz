@@ -47,6 +47,9 @@ impl App {
         if args.device.is_some() {
             settings.device = args.device.clone();
         }
+        if let Some(dir) = &args.presets {
+            settings.preset_dir = dir.display().to_string();
+        }
         Self {
             args,
             settings,

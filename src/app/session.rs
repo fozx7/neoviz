@@ -79,6 +79,10 @@ impl Session {
         config_path: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let size = gpu.size();
+        let mut visualizers = visualizers;
+        for v in &mut visualizers {
+            v.configure(&settings, true);
+        }
         let names: Vec<String> = visualizers.iter().map(|v| v.name().to_owned()).collect();
         let session = Self {
             capture: Capture::start(settings.device.clone())?,
@@ -160,6 +164,13 @@ impl Session {
                 )));
             }
             Action::ToggleLock => self.toggle_lock(),
+            Action::NextPreset | Action::PreviousPreset => {
+                let direction = if action == Action::NextPreset { 1 } else { -1 };
+                let current = &mut self.visualizers[self.switcher.current()];
+                if let Some(preset) = current.step_preset(direction) {
+                    self.toast = Some(Toast::new(format!("{}: {preset}", current.name())));
+                }
+            }
             Action::ToggleSettings => self.set_settings_open(!self.show_settings),
             Action::ToggleDebugView => self.show_debug = !self.show_debug,
             Action::ToggleBloom => {
@@ -288,6 +299,11 @@ impl Session {
             capture_error: capture_error.as_deref(),
             locked: self.locked,
             config_path: self.config_path.as_deref(),
+            statuses: self
+                .visualizers
+                .iter()
+                .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s)))
+                .collect(),
         };
         let hud = Hud {
             toast: self.toast.as_ref(),
@@ -316,6 +332,11 @@ impl Session {
             self.toggle_lock();
         }
         self.apply_changes(&before);
+        if self.settings != before || requests.rescan_presets {
+            for v in &mut self.visualizers {
+                v.configure(&self.settings, requests.rescan_presets);
+            }
+        }
     }
 
     /// Applies settings that need more than being read each frame.

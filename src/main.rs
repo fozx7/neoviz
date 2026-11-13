@@ -31,6 +31,10 @@ pub struct Args {
     #[arg(long, value_name = "NAME")]
     pub visualizer: Option<String>,
 
+    /// Folder of MilkDrop `.milk` presets (searched recursively; remembered).
+    #[arg(long, value_name = "DIR")]
+    pub presets: Option<std::path::PathBuf>,
+
     /// Print the audio devices that can be captured, then exit.
     #[arg(long)]
     pub list_devices: bool,

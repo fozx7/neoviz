@@ -23,6 +23,8 @@ pub enum Action {
     /// Pause random switching on the current visualizer.
     ToggleLock,
     ToggleSettings,
+    NextPreset,
+    PreviousPreset,
 }
 
 /// Returns the action bound to a key press, if any.
@@ -39,6 +41,8 @@ pub fn action_for_key(key: &Key) -> Option<Action> {
         Key::Character(c) if c.eq_ignore_ascii_case("r") => Some(Action::ToggleRandom),
         Key::Named(NamedKey::Space) => Some(Action::ToggleLock),
         Key::Named(NamedKey::Tab) => Some(Action::ToggleSettings),
+        Key::Character(c) if c == "]" => Some(Action::NextPreset),
+        Key::Character(c) if c == "[" => Some(Action::PreviousPreset),
         Key::Character(c) if c.eq_ignore_ascii_case("f") => Some(Action::ToggleFullscreen),
         _ => None,
     }
@@ -139,6 +143,18 @@ mod tests {
         assert_eq!(
             action_for_key(&Key::Named(NamedKey::Tab)),
             Some(Action::ToggleSettings)
+        );
+    }
+
+    #[test]
+    fn brackets_step_presets() {
+        assert_eq!(
+            action_for_key(&Key::Character("]".into())),
+            Some(Action::NextPreset)
+        );
+        assert_eq!(
+            action_for_key(&Key::Character("[".into())),
+            Some(Action::PreviousPreset)
         );
     }
 

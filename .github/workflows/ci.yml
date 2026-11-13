@@ -48,3 +48,28 @@ jobs:
             target/release/neoviz
             target/release/neoviz.exe
           if-no-files-found: error
+
+  milkdrop:
+    name: ubuntu-latest (milkdrop)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install audio and OpenGL dev libs
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libpulse-dev libegl-dev libgl-dev cmake g++
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: milkdrop
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked --features milkdrop -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --features milkdrop

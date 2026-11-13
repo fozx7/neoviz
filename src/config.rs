@@ -14,6 +14,7 @@ use crate::audio::analysis::GAIN_LIMIT_DB;
 const FILE_NAME: &str = "settings.toml";
 pub const SMOOTHING_RANGE: (f32, f32) = (0.03, 1.0);
 pub const AUTO_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
+pub const PRESET_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -39,6 +40,10 @@ pub struct Settings {
     pub show_fps: bool,
     pub always_on_top: bool,
     pub borderless: bool,
+    /// Folder searched (recursively) for MilkDrop `.milk` presets; empty = none.
+    pub preset_dir: String,
+    /// Seconds between MilkDrop preset changes.
+    pub preset_secs: f32,
 }
 
 impl Default for Settings {
@@ -57,6 +62,8 @@ impl Default for Settings {
             show_fps: false,
             always_on_top: false,
             borderless: false,
+            preset_dir: String::new(),
+            preset_secs: 30.0,
         }
     }
 }
@@ -72,6 +79,8 @@ impl Settings {
             .clamp(SMOOTHING_RANGE.0, SMOOTHING_RANGE.1);
         self.auto_switch_secs = finite_or(self.auto_switch_secs, d.auto_switch_secs)
             .clamp(AUTO_SWITCH_RANGE.0, AUTO_SWITCH_RANGE.1);
+        self.preset_secs = finite_or(self.preset_secs, d.preset_secs)
+            .clamp(PRESET_SWITCH_RANGE.0, PRESET_SWITCH_RANGE.1);
         self
     }
 

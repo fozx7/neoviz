@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
 
 use crate::{
     audio::{DeviceInfo, analysis::GAIN_LIMIT_DB},
-    config::{AUTO_SWITCH_RANGE, SMOOTHING_RANGE, Settings},
+    config::{AUTO_SWITCH_RANGE, PRESET_SWITCH_RANGE, SMOOTHING_RANGE, Settings},
 };
 
 use super::Toast;
@@ -20,6 +20,8 @@ pub struct PanelInfo<'a> {
     pub capture_error: Option<&'a str>,
     pub locked: bool,
     pub config_path: Option<&'a Path>,
+    /// (visualizer name, status line) for visualizers with something to report.
+    pub statuses: Vec<(String, String)>,
 }
 
 /// Things the user asked for in the panel that aren't plain settings.
@@ -29,6 +31,8 @@ pub struct PanelRequests {
     pub select: Option<usize>,
     pub refresh_devices: bool,
     pub toggle_lock: bool,
+    /// Reload preset folders.
+    pub rescan_presets: bool,
 }
 
 const LOOPBACK_LABEL: &str = "Default output (what's playing)";
@@ -53,6 +57,10 @@ pub fn settings_panel(
                 ui.separator();
                 visualizer_section(ui, settings, info, &mut requests);
                 ui.separator();
+                if cfg!(feature = "milkdrop") {
+                    milkdrop_section(ui, settings, info, &mut requests);
+                    ui.separator();
+                }
                 display_section(ui, settings);
                 ui.separator();
                 footer(ui, info);
@@ -156,6 +164,43 @@ fn visualizer_section(
             }
         });
     }
+}
+
+fn milkdrop_section(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    info: &PanelInfo,
+    requests: &mut PanelRequests,
+) {
+    ui.heading("MilkDrop");
+    ui.horizontal(|ui| {
+        ui.label("Preset folder");
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut settings.preset_dir)
+                .hint_text("/path/to/presets")
+                .desired_width(260.0),
+        );
+        // Rescan when editing finishes (Enter or clicking away), not per keystroke.
+        if field.lost_focus() {
+            requests.rescan_presets = true;
+        }
+        if ui.button("Rescan").clicked() {
+            requests.rescan_presets = true;
+        }
+    });
+    ui.add(
+        egui::Slider::new(
+            &mut settings.preset_secs,
+            PRESET_SWITCH_RANGE.0..=PRESET_SWITCH_RANGE.1,
+        )
+        .text("Change preset every")
+        .suffix(" s")
+        .logarithmic(true),
+    );
+    for (name, status) in &info.statuses {
+        ui.label(format!("{name}: {status}"));
+    }
+    ui.small("[ / ] step through presets while MilkDrop is showing.");
 }
 
 fn display_section(ui: &mut egui::Ui, settings: &mut Settings) {

@@ -2,7 +2,7 @@
 
 A retro-style music visualizer for Windows and Linux. It listens to whatever your computer is playing (Spotify, a browser, a game) and draws full-screen visuals in the spirit of the mid-2000s media player visualizers. It doesn't play music itself.
 
-> **Status:** usable. Audio capture, all seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay and saved settings are in. MilkDrop presets and packaging are next. See [SCOPE.md](SCOPE.md) for the full plan.
+> **Status:** usable. Audio capture, all seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay, saved settings and optional MilkDrop presets (Linux) are in. Packaging is next. See [SCOPE.md](SCOPE.md) for the full plan.
 
 ## Build
 
@@ -23,10 +23,28 @@ Install the PulseAudio client libraries (they also work on PipeWire via `pipewir
 
 Nothing extra beyond the Rust toolchain (MSVC).
 
+### MilkDrop presets (optional, Linux)
+
+neoViz can play MilkDrop presets through [libprojectM](https://github.com/projectM-visualizer/projectm), built from source as part of the build. You'll need `cmake`, a C++ compiler and the OpenGL/EGL headers (on Arch these come with `base-devel`, `cmake` and `mesa`; on Debian/Ubuntu: `cmake g++ libegl-dev libgl-dev`).
+
+```sh
+cargo run --release --features milkdrop -- --presets ~/milkdrop-presets
+```
+
+Presets aren't included. A good start is the "cream of the crop" pack:
+
+```sh
+git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop ~/milkdrop-presets
+```
+
+The folder can also be set in the settings overlay. MilkDrop then appears as one more visualizer: it changes preset every 30 s (adjustable), and `[` / `]` step through presets.
+
+projectM is LGPL-3.0 and is linked statically into MilkDrop builds. That's fine for personal use; if you distribute such a build, the LGPL requires that recipients can relink it against their own projectM. The default build doesn't include projectM.
+
 ## Usage
 
 ```sh
-neoviz [--fullscreen] [--monitor N] [--device NAME] [--visualizer NAME] [--list-devices]
+neoviz [--fullscreen] [--monitor N] [--device NAME] [--visualizer NAME] [--presets DIR] [--list-devices]
 ```
 
 By default neoViz captures whatever is playing on your default output device and follows it if you switch outputs. Use `--device` to capture something else, such as a microphone:
@@ -47,6 +65,7 @@ You can also pick the device in the settings overlay (`Tab`).
 | `Tab` | Settings overlay |
 | `B` | Toggle bloom |
 | `C` | Toggle CRT scanlines |
+| `[` / `]` | Previous / next MilkDrop preset |
 | `D` | Toggle the analysis debug view |
 
 Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy Particles, Classic Lightshow, Starfield Warp, then variants: LED Bars, Ring Scope, Mirror Bars, Stereo X/Y.
