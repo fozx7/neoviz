@@ -62,6 +62,10 @@ pub struct AudioFrame<'a> {
     pub beat_intensity: f32,
     /// True after [`SILENCE_AFTER_SECS`] of silence.
     pub silent: bool,
+    /// Stereo frames captured since the previous analysis (the newest
+    /// `new_frames` entries of `left`/`right`, capped at their length).
+    #[cfg_attr(not(all(feature = "milkdrop", target_os = "linux")), allow(dead_code))]
+    pub new_frames: usize,
 }
 
 pub struct Analyzer {
@@ -89,6 +93,9 @@ pub struct Analyzer {
     peak: f32,
     beat_intensity: Option<f32>,
     silence_secs: f32,
+    /// Frames ingested since the last `analyze`.
+    pending_frames: usize,
+    new_frames: usize,
 }
 
 impl Default for Analyzer {
@@ -117,6 +124,8 @@ impl Default for Analyzer {
             peak: 0.0,
             beat_intensity: None,
             silence_secs: 0.0,
+            pending_frames: 0,
+            new_frames: 0,
         }
     }
 }
@@ -141,11 +150,13 @@ impl Analyzer {
             self.left[tail + i] = *l;
             self.right[tail + i] = *r;
         }
+        self.pending_frames += frames;
         frames
     }
 
     /// Recomputes everything from the current history, advancing time by `dt` seconds.
     pub fn analyze(&mut self, sample_rate: u32, dt: f32) {
+        self.new_frames = std::mem::take(&mut self.pending_frames);
         for ((m, l), r) in self.mono.iter_mut().zip(&self.left).zip(&self.right) {
             *m = 0.5 * (l + r);
         }
@@ -209,6 +220,7 @@ impl Analyzer {
             beat: self.beat_intensity.is_some(),
             beat_intensity: self.beat_intensity.unwrap_or(0.0),
             silent: self.silence_secs >= SILENCE_AFTER_SECS,
+            new_frames: self.new_frames.min(WAVEFORM_LEN),
         }
     }
 }
@@ -402,5 +414,19 @@ mod tests {
         play(&mut a, 440.0, 0.5, 0.1);
         assert!(!a.frame().silent);
         assert_eq!(a.silence_secs, 0.0);
+    }
+
+    #[test]
+    fn counts_new_frames_since_the_last_analysis() {
+        let mut a = Analyzer::default();
+        feed(&mut a, std::iter::repeat_n((0.0, 0.0), 300));
+        feed(&mut a, std::iter::repeat_n((0.0, 0.0), 500));
+        a.analyze(RATE, DT);
+        assert_eq!(a.frame().new_frames, 800);
+        a.analyze(RATE, DT);
+        assert_eq!(a.frame().new_frames, 0);
+        feed(&mut a, std::iter::repeat_n((0.0, 0.0), 5000));
+        a.analyze(RATE, DT);
+        assert_eq!(a.frame().new_frames, WAVEFORM_LEN, "capped to what's kept");
     }
 }

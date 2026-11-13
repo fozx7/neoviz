@@ -3,12 +3,20 @@
 
 use std::{path::PathBuf, sync::Arc, time::Instant};
 
-use winit::window::{Fullscreen, Window, WindowLevel};
+use anyhow::{Context, Result};
+use winit::{
+    dpi::{LogicalSize, PhysicalSize},
+    event_loop::ActiveEventLoop,
+    monitor::MonitorHandle,
+    window::{Fullscreen, Window, WindowId, WindowLevel},
+};
+
+use super::layout::{self, Rect};
 
 use crate::{
     audio::{
         self, Capture, DeviceInfo,
-        analysis::{Analyzer, GAIN_LIMIT_DB, GAIN_STEP_DB},
+        analysis::{Analyzer, AudioFrame, GAIN_LIMIT_DB, GAIN_STEP_DB},
         bands::BandSettings,
     },
     config::{self, Settings},
@@ -16,7 +24,8 @@ use crate::{
     render::{
         compositor::{Compositor, INCOMING, OUTGOING, PostFx},
         debug_view::DebugView,
-        gpu::Gpu,
+        gpu::{Display, Gpu},
+        present::{Canvas, Slice, WHOLE},
     },
     ui::{
         Toast, Ui,
@@ -26,6 +35,8 @@ use crate::{
 };
 
 const WINDOW_TITLE: &str = "neoViz";
+/// Size of the window when not full screen.
+pub const WINDOWED_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 /// Longest frame time fed to the analysis, in seconds.
 const MAX_FRAME_DT: f32 = 0.1;
 /// How often changed settings are written to disk.
@@ -41,8 +52,15 @@ pub enum Outcome {
 }
 
 pub struct Session {
-    pub window: Arc<Window>,
     gpu: Gpu,
+    /// Windows the frame is shown in. `displays[0]` is the main window (with
+    /// the overlay); span mode adds one per extra monitor.
+    displays: Vec<Display>,
+    /// The part of the canvas each display shows (same order as `displays`).
+    slices: Vec<Slice>,
+    spanning: bool,
+    /// Every frame is rendered here, then copied to the displays.
+    canvas: Canvas,
     capture: Capture,
     analyzer: Analyzer,
     visualizers: Vec<Box<dyn Visualizer>>,
@@ -70,21 +88,26 @@ pub struct Session {
 
 impl Session {
     pub fn new(
-        window: Arc<Window>,
         gpu: Gpu,
+        main: Display,
         visualizers: Vec<Box<dyn Visualizer>>,
         start: usize,
         settings: Settings,
         saved: Settings,
         config_path: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
-        let size = gpu.size();
+        let size = main.size();
+        let mut visualizers = visualizers;
+        for v in &mut visualizers {
+            v.configure(&settings, true);
+        }
         let names: Vec<String> = visualizers.iter().map(|v| v.name().to_owned()).collect();
         let session = Self {
             capture: Capture::start(settings.device.clone())?,
             compositor: Compositor::new(gpu.device(), gpu.surface_format(), size),
             debug_view: DebugView::new(gpu.device(), gpu.surface_format()),
-            ui: Ui::new(&window, gpu.device(), gpu.ui_format()),
+            ui: Ui::new(&main.window, gpu.device(), gpu.ui_format()),
+            canvas: Canvas::new(gpu.device(), gpu.surface_format(), size),
             switcher: Switcher::new(visualizers.len(), start),
             toast: Some(Toast::new(names[start].clone())),
             analyzer: Analyzer::default(),
@@ -103,33 +126,144 @@ impl Session {
             locked: false,
             fps: 60.0,
             last_frame: Instant::now(),
-            window,
+            displays: vec![main],
+            slices: vec![WHOLE],
+            spanning: false,
             gpu,
         };
         session.update_title();
-        session.window.request_redraw();
+        session.window().request_redraw();
         Ok(session)
     }
 
-    /// Lets the UI see a window event first. Returns true if it used it.
+    /// The main window (the one with the overlay).
+    pub fn window(&self) -> &Arc<Window> {
+        &self.displays[0].window
+    }
+
+    /// Whether `id` is one of this session's windows.
+    pub fn owns(&self, id: WindowId) -> bool {
+        self.displays.iter().any(|d| d.window.id() == id)
+    }
+
+    pub fn is_main(&self, id: WindowId) -> bool {
+        self.window().id() == id
+    }
+
+    pub fn is_spanning(&self) -> bool {
+        self.spanning
+    }
+
+    /// Lets the UI see a main-window event first. Returns true if it used it.
     pub fn ui_event(&mut self, event: &winit::event::WindowEvent) -> bool {
-        self.ui.on_window_event(&self.window, event)
+        let window = self.displays[0].window.clone();
+        self.ui.on_window_event(&window, event)
     }
 
     pub fn ui_wants_keyboard(&self) -> bool {
         self.ui.wants_keyboard()
     }
 
-    pub fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
-        self.gpu.resize(size);
-        let size = self.gpu.size();
-        self.compositor.resize(self.gpu.device(), size);
-        for v in &mut self.visualizers {
-            v.resize(self.gpu.device(), size);
+    /// A window changed size. Outside span mode the canvas follows the main window.
+    pub fn on_resized(&mut self, id: WindowId, size: PhysicalSize<u32>) {
+        let Some(display) = self.displays.iter_mut().find(|d| d.window.id() == id) else {
+            return;
+        };
+        display.resize(&self.gpu, size);
+        if !self.spanning && self.is_main(id) {
+            let size = self.displays[0].size();
+            self.resize_canvas(size);
         }
     }
 
-    pub fn apply(&mut self, action: Action) -> Outcome {
+    fn resize_canvas(&mut self, size: (u32, u32)) {
+        let device = self.gpu.device();
+        self.canvas.resize(device, size);
+        self.compositor.resize(device, size);
+        for v in &mut self.visualizers {
+            v.resize(device, size);
+        }
+    }
+
+    /// Spreads one canvas over every monitor, with a full-screen window on each.
+    pub fn enter_span(&mut self, event_loop: &ActiveEventLoop) {
+        if self.spanning {
+            return;
+        }
+        let main = self.window().clone();
+        let monitors: Vec<MonitorHandle> = main.available_monitors().collect();
+        let here = main.current_monitor().or_else(|| monitors.first().cloned());
+        if monitors.len() < 2 {
+            main.set_fullscreen(Some(Fullscreen::Borderless(here)));
+            self.toast = Some(Toast::new("Only one monitor found: full screen instead"));
+            return;
+        }
+        // The main window (with the overlay) stays on the monitor it's on.
+        let mut ordered: Vec<MonitorHandle> = here.iter().cloned().collect();
+        ordered.extend(monitors.into_iter().filter(|m| Some(m) != here.as_ref()));
+        main.set_fullscreen(Some(Fullscreen::Borderless(ordered.first().cloned())));
+        for monitor in &ordered[1..] {
+            match self.open_span_window(event_loop, monitor) {
+                Ok(display) => self.displays.push(display),
+                Err(e) => {
+                    log::error!("span mode: {e:#}");
+                    self.leave_span();
+                    self.toast = Some(Toast::new("Couldn't open a window on every monitor"));
+                    return;
+                }
+            }
+        }
+        let rects: Vec<Rect> = ordered.iter().map(monitor_rect).collect();
+        let layout = layout::span(&rects);
+        log::info!(
+            "spanning {} monitors, canvas {}x{}",
+            rects.len(),
+            layout.canvas.0,
+            layout.canvas.1
+        );
+        self.slices = layout
+            .slices
+            .iter()
+            .map(|r| r.uv_in(layout.canvas))
+            .collect();
+        self.spanning = true;
+        self.resize_canvas(layout.canvas);
+        self.toast = Some(Toast::new(format!("Spanning {} monitors", rects.len())));
+    }
+
+    fn open_span_window(
+        &self,
+        event_loop: &ActiveEventLoop,
+        monitor: &MonitorHandle,
+    ) -> Result<Display> {
+        let attrs = Window::default_attributes()
+            .with_title(WINDOW_TITLE)
+            .with_decorations(false)
+            .with_position(monitor.position())
+            .with_inner_size(monitor.size())
+            .with_fullscreen(Some(Fullscreen::Borderless(Some(monitor.clone()))));
+        let window = event_loop
+            .create_window(attrs)
+            .context("creating a window for another monitor")?;
+        self.gpu.add_display(Arc::new(window))
+    }
+
+    /// Back to one window, windowed.
+    ///
+    /// The original main window always stays, so it returns to its own
+    /// monitor and size. (On KDE Wayland focus may stay on the other monitor:
+    /// see the README's span mode notes.)
+    pub fn leave_span(&mut self) {
+        // Dropping the extra displays closes their windows.
+        self.displays.truncate(1);
+        self.slices = vec![WHOLE];
+        self.spanning = false;
+        self.window().set_fullscreen(None);
+        let size = self.displays[0].size();
+        self.resize_canvas(size);
+    }
+
+    pub fn apply(&mut self, action: Action, event_loop: &ActiveEventLoop) -> Outcome {
         match action {
             Action::SensitivityUp | Action::SensitivityDown => {
                 let step = if action == Action::SensitivityUp {
@@ -160,6 +294,13 @@ impl Session {
                 )));
             }
             Action::ToggleLock => self.toggle_lock(),
+            Action::NextPreset | Action::PreviousPreset => {
+                let direction = if action == Action::NextPreset { 1 } else { -1 };
+                let current = &mut self.visualizers[self.switcher.current()];
+                if let Some(preset) = current.step_preset(direction) {
+                    self.toast = Some(Toast::new(format!("{}: {preset}", current.name())));
+                }
+            }
             Action::ToggleSettings => self.set_settings_open(!self.show_settings),
             Action::ToggleDebugView => self.show_debug = !self.show_debug,
             Action::ToggleBloom => {
@@ -173,16 +314,20 @@ impl Session {
                     on_off(self.settings.scanlines)
                 )));
             }
+            Action::ToggleFullscreen if self.spanning => self.leave_span(),
             Action::ToggleFullscreen => {
-                let next = match self.window.fullscreen() {
+                let window = self.window();
+                let next = match window.fullscreen() {
                     Some(_) => None,
-                    None => Some(Fullscreen::Borderless(self.window.current_monitor())),
+                    None => Some(Fullscreen::Borderless(window.current_monitor())),
                 };
-                self.window.set_fullscreen(next);
+                window.set_fullscreen(next);
             }
+            Action::EnterSpan => self.enter_span(event_loop),
             Action::Escape if self.show_settings => self.set_settings_open(false),
-            Action::Escape if self.window.fullscreen().is_some() => {
-                self.window.set_fullscreen(None)
+            Action::Escape if self.spanning => self.leave_span(),
+            Action::Escape if self.window().fullscreen().is_some() => {
+                self.window().set_fullscreen(None)
             }
             Action::Escape => return Outcome::Quit,
         }
@@ -221,6 +366,9 @@ impl Session {
             self.switcher.random(&self.rotation(), &mut self.rng);
             self.on_switched();
         }
+        if let Some(message) = self.visualizers[self.switcher.current()].take_message() {
+            self.toast = Some(Toast::new(message));
+        }
         if let Some(toast) = &mut self.toast
             && !toast.tick(dt)
         {
@@ -230,7 +378,14 @@ impl Session {
         self.build_ui();
 
         let audio = self.analyzer.frame();
-        let size = self.gpu.size();
+        let size = self.canvas.size();
+        // Visualizers see a scaled clock (Speed) and softened beats (Beat
+        // flashes); analysis, crossfades and the UI keep real time.
+        let motion_dt = dt * self.settings.speed;
+        let calmed = AudioFrame {
+            beat_intensity: audio.beat_intensity * self.settings.flash,
+            ..audio
+        };
         if self.show_debug {
             self.debug_view
                 .update(self.gpu.queue(), &audio, sample_rate, size, dt);
@@ -238,41 +393,69 @@ impl Session {
             self.switcher.advance(dt);
             let current = self.switcher.current();
             for index in std::iter::once(current).chain(self.switcher.outgoing()) {
-                self.visualizers[index].update(&audio, dt);
+                self.visualizers[index].update(&calmed, motion_dt);
             }
         }
         self.draw(size);
         self.save_if_changed(dt);
-        self.window.request_redraw();
+        self.window().request_redraw();
     }
 
+    /// Renders the frame into the canvas, then copies each display its slice.
     fn draw(&mut self, size: (u32, u32)) {
         let current = self.switcher.current();
-        let outgoing = self.switcher.outgoing();
         let mix = self.switcher.mix();
         let post = PostFx {
             bloom: self.settings.bloom,
             scanlines: self.settings.scanlines,
         };
-        let show_debug = self.show_debug;
-        let (visualizers, compositor, debug_view, ui) = (
-            &mut self.visualizers,
-            &self.compositor,
-            &self.debug_view,
-            &mut self.ui,
-        );
-        self.gpu.render(|device, queue, encoder, targets| {
-            if show_debug {
-                debug_view.draw(encoder, targets.scene);
-            } else {
-                if let Some(index) = outgoing {
-                    visualizers[index].render(queue, encoder, compositor.slot(OUTGOING), size);
-                }
-                visualizers[current].render(queue, encoder, compositor.slot(INCOMING), size);
-                compositor.draw(queue, encoder, targets.scene, mix, post);
-            }
-            ui.paint(device, queue, encoder, targets.ui, size);
+        let (device, queue) = (self.gpu.device(), self.gpu.queue());
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("frame"),
         });
+
+        let canvas = self.canvas.view();
+        if self.show_debug {
+            self.debug_view.draw(&mut encoder, canvas);
+        } else {
+            if let Some(index) = self.switcher.outgoing() {
+                self.visualizers[index].render(
+                    queue,
+                    &mut encoder,
+                    self.compositor.slot(OUTGOING),
+                    size,
+                );
+            }
+            self.visualizers[current].render(
+                queue,
+                &mut encoder,
+                self.compositor.slot(INCOMING),
+                size,
+            );
+            self.compositor.draw(queue, &mut encoder, canvas, mix, post);
+        }
+
+        let mut frames = Vec::with_capacity(self.displays.len());
+        for (i, display) in self.displays.iter_mut().enumerate() {
+            let frame = display.acquire(&self.gpu);
+            if let Some(frame) = &frame {
+                let slice = self.slices.get(i).copied().unwrap_or(WHOLE);
+                self.canvas
+                    .present(device, queue, &mut encoder, i, slice, &frame.view());
+                if i == 0 {
+                    let ui_view = frame.ui_view(&self.gpu);
+                    self.ui
+                        .paint(device, queue, &mut encoder, &ui_view, display.size());
+                }
+            }
+            frames.push(frame);
+        }
+        queue.submit([encoder.finish()]);
+        for (display, frame) in self.displays.iter_mut().zip(frames) {
+            if let Some(frame) = frame {
+                display.present(&self.gpu, frame);
+            }
+        }
     }
 
     /// Lays out the overlay and HUD, then acts on anything the user changed.
@@ -288,6 +471,11 @@ impl Session {
             capture_error: capture_error.as_deref(),
             locked: self.locked,
             config_path: self.config_path.as_deref(),
+            statuses: self
+                .visualizers
+                .iter()
+                .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s)))
+                .collect(),
         };
         let hud = Hud {
             toast: self.toast.as_ref(),
@@ -297,7 +485,8 @@ impl Session {
         let mut requests = Default::default();
         let mut open = self.show_settings;
         let settings = &mut self.settings;
-        self.ui.run(&self.window, |ctx| {
+        let window = self.displays[0].window.clone();
+        self.ui.run(&window, |ctx| {
             if open {
                 requests = overlay::settings_panel(ctx, settings, &info, &mut open);
             }
@@ -316,6 +505,11 @@ impl Session {
             self.toggle_lock();
         }
         self.apply_changes(&before);
+        if self.settings != before || requests.rescan_presets {
+            for v in &mut self.visualizers {
+                v.configure(&self.settings, requests.rescan_presets);
+            }
+        }
     }
 
     /// Applies settings that need more than being read each frame.
@@ -340,13 +534,13 @@ impl Session {
     }
 
     pub fn apply_window_settings(&self) {
-        self.window
+        self.window()
             .set_window_level(if self.settings.always_on_top {
                 WindowLevel::AlwaysOnTop
             } else {
                 WindowLevel::Normal
             });
-        self.window.set_decorations(!self.settings.borderless);
+        self.window().set_decorations(!self.settings.borderless);
     }
 
     fn set_settings_open(&mut self, open: bool) {
@@ -390,7 +584,7 @@ impl Session {
 
     fn update_title(&self) {
         let name = &self.names[self.switcher.current()];
-        self.window.set_title(&format!("{WINDOW_TITLE} · {name}"));
+        self.window().set_title(&format!("{WINDOW_TITLE} · {name}"));
     }
 
     fn save_if_changed(&mut self, dt: f32) {
@@ -414,6 +608,11 @@ impl Session {
             Err(e) => log::warn!("saving settings: {e:#}"),
         }
     }
+}
+
+fn monitor_rect(m: &MonitorHandle) -> Rect {
+    let (pos, size) = (m.position(), m.size());
+    Rect::new(pos.x, pos.y, size.width, size.height)
 }
 
 fn on_off(on: bool) -> &'static str {

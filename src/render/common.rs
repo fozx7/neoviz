@@ -196,7 +196,17 @@ pub struct Target {
 }
 
 impl Target {
+    /// An [`HDR_FORMAT`] target.
     pub fn new(device: &wgpu::Device, label: &str, size: (u32, u32)) -> Self {
+        Self::with_format(device, label, size, HDR_FORMAT)
+    }
+
+    pub fn with_format(
+        device: &wgpu::Device,
+        label: &str,
+        size: (u32, u32),
+        format: wgpu::TextureFormat,
+    ) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
             size: wgpu::Extent3d {
@@ -207,7 +217,7 @@ impl Target {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: HDR_FORMAT,
+            format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });

@@ -17,6 +17,10 @@ pub struct Args {
     #[arg(long)]
     pub fullscreen: bool,
 
+    /// Start spread across every monitor (span mode; also double-tap F).
+    #[arg(long)]
+    pub span: bool,
+
     /// Monitor to open on (0-based index). Defaults to the primary monitor.
     #[arg(long, value_name = "N")]
     pub monitor: Option<usize>,
@@ -30,6 +34,10 @@ pub struct Args {
     /// Visualizer to start with (case-insensitive name, e.g. "ring scope").
     #[arg(long, value_name = "NAME")]
     pub visualizer: Option<String>,
+
+    /// Folder of MilkDrop `.milk` presets (searched recursively; remembered).
+    #[arg(long, value_name = "DIR")]
+    pub presets: Option<std::path::PathBuf>,
 
     /// Print the audio devices that can be captured, then exit.
     #[arg(long)]

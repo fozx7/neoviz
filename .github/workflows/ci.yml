@@ -19,9 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install Linux audio dev libs
+      - name: Install Linux audio and OpenGL dev libs
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpulse-dev
+        # OpenGL/EGL, cmake and g++ are for MilkDrop (projectM), on by default on Linux.
+        run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libpulse-dev libegl-dev libgl-dev cmake g++
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -38,6 +41,10 @@ jobs:
       - name: Test
         run: cargo test --locked
 
+      - name: Check without MilkDrop
+        if: runner.os == 'Linux'
+        run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
+
       - name: Build release
         run: cargo build --release --locked
 
@@ -48,3 +55,4 @@ jobs:
             target/release/neoviz
             target/release/neoviz.exe
           if-no-files-found: error
+

@@ -8,11 +8,13 @@ mod color;
 mod common;
 mod layered;
 mod lightshow;
+#[cfg(all(feature = "milkdrop", target_os = "linux"))]
+mod milkdrop;
 mod particles;
 mod scope;
 mod starfield;
 
-use crate::audio::analysis::AudioFrame;
+use crate::{audio::analysis::AudioFrame, config::Settings};
 
 pub use common::Rng;
 
@@ -27,6 +29,26 @@ pub trait Visualizer {
 
     /// Advances animation state by `dt` seconds using this frame's audio.
     fn update(&mut self, audio: &AudioFrame, dt: f32);
+
+    /// Picks up settings at startup and whenever they change. `rescan` asks
+    /// for external resources (e.g. preset folders) to be reloaded.
+    fn configure(&mut self, _settings: &Settings, _rescan: bool) {}
+
+    /// Steps through this visualizer's own presets, if it has any. Returns
+    /// text to show (e.g. the new preset's name).
+    fn step_preset(&mut self, _direction: isize) -> Option<String> {
+        None
+    }
+
+    /// A message to show as a toast (e.g. "switched to preset X"), taken once.
+    fn take_message(&mut self) -> Option<String> {
+        None
+    }
+
+    /// A status line for the settings panel, if there's something to say.
+    fn status(&self) -> Option<String> {
+        None
+    }
 
     /// Records commands that draw the current state into `target`
     /// (an [`HDR_FORMAT`](crate::render::common::HDR_FORMAT) texture of `size`),
@@ -46,7 +68,7 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visual
     use bars::{Bars, BarsVariant};
     use layered::{Kind, Layered};
     use scope::{Scope, ScopeVariant};
-    vec![
+    let mut all: Vec<Box<dyn Visualizer>> = vec![
         Box::new(Bars::new(device, BarsVariant::Solid)),
         Box::new(Scope::new(device, size, ScopeVariant::Line)),
         Box::new(Layered::new(device, size, Kind::AmbientSwirl)),
@@ -54,11 +76,19 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visual
         Box::new(particles::Particles::new(device, size)),
         Box::new(lightshow::Lightshow::new(device, size)),
         Box::new(starfield::Starfield::new(device, size)),
-        Box::new(Bars::new(device, BarsVariant::Led)),
+    ];
+    #[cfg(all(feature = "milkdrop", target_os = "linux"))]
+    match milkdrop::MilkDrop::new(device, size) {
+        Ok(m) => all.push(Box::new(m)),
+        Err(e) => log::error!("MilkDrop unavailable: {e:#}"),
+    }
+    all.extend([
+        Box::new(Bars::new(device, BarsVariant::Led)) as Box<dyn Visualizer>,
         Box::new(Scope::new(device, size, ScopeVariant::Ring)),
         Box::new(Bars::new(device, BarsVariant::Mirror)),
         Box::new(Scope::new(device, size, ScopeVariant::StereoXy)),
-    ]
+    ]);
+    all
 }
 
 /// Tracks which visualizer is showing and any crossfade in progress.

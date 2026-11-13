@@ -6,7 +6,7 @@ use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
 
 use crate::{
     audio::{DeviceInfo, analysis::GAIN_LIMIT_DB},
-    config::{AUTO_SWITCH_RANGE, SMOOTHING_RANGE, Settings},
+    config::{AUTO_SWITCH_RANGE, PRESET_SWITCH_RANGE, SMOOTHING_RANGE, SPEED_RANGE, Settings},
 };
 
 use super::Toast;
@@ -20,6 +20,8 @@ pub struct PanelInfo<'a> {
     pub capture_error: Option<&'a str>,
     pub locked: bool,
     pub config_path: Option<&'a Path>,
+    /// (visualizer name, status line) for visualizers with something to report.
+    pub statuses: Vec<(String, String)>,
 }
 
 /// Things the user asked for in the panel that aren't plain settings.
@@ -29,6 +31,8 @@ pub struct PanelRequests {
     pub select: Option<usize>,
     pub refresh_devices: bool,
     pub toggle_lock: bool,
+    /// Reload preset folders.
+    pub rescan_presets: bool,
 }
 
 const LOOPBACK_LABEL: &str = "Default output (what's playing)";
@@ -52,6 +56,12 @@ pub fn settings_panel(
                 audio_section(ui, settings, info, &mut requests);
                 ui.separator();
                 visualizer_section(ui, settings, info, &mut requests);
+                ui.separator();
+                if cfg!(all(feature = "milkdrop", target_os = "linux")) {
+                    milkdrop_section(ui, settings, info, &mut requests);
+                    ui.separator();
+                }
+                motion_section(ui, settings);
                 ui.separator();
                 display_section(ui, settings);
                 ui.separator();
@@ -155,6 +165,68 @@ fn visualizer_section(
                 requests.select = Some(i);
             }
         });
+    }
+}
+
+fn milkdrop_section(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    info: &PanelInfo,
+    requests: &mut PanelRequests,
+) {
+    ui.heading("MilkDrop");
+    ui.horizontal(|ui| {
+        ui.label("Preset folder");
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut settings.preset_dir)
+                .hint_text("/path/to/presets")
+                .desired_width(260.0),
+        );
+        // Rescan when editing finishes (Enter or clicking away), not per keystroke.
+        if field.lost_focus() {
+            requests.rescan_presets = true;
+        }
+        if ui.button("Rescan").clicked() {
+            requests.rescan_presets = true;
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut settings.preset_auto, "Change preset every");
+        ui.add_enabled(
+            settings.preset_auto,
+            egui::DragValue::new(&mut settings.preset_secs)
+                .range(PRESET_SWITCH_RANGE.0..=PRESET_SWITCH_RANGE.1)
+                .speed(1.0)
+                .suffix(" s"),
+        );
+    });
+    ui.checkbox(&mut settings.preset_shuffle, "Shuffle (random order)");
+    for (name, status) in &info.statuses {
+        ui.label(format!("{name}: {status}"));
+    }
+    ui.small("[ / ] step through presets while MilkDrop is showing.");
+}
+
+fn motion_section(ui: &mut egui::Ui, settings: &mut Settings) {
+    ui.heading("Motion");
+    ui.add(
+        egui::Slider::new(&mut settings.speed, SPEED_RANGE.0..=SPEED_RANGE.1)
+            .text("Speed")
+            .suffix("×")
+            .logarithmic(true),
+    )
+    .on_hover_text("How fast visualizers move and cycle colours on their own. MilkDrop presets keep their own pace.");
+    let mut percent = settings.flash * 100.0;
+    if ui
+        .add(
+            egui::Slider::new(&mut percent, 0.0..=100.0)
+                .text("Beat flashes")
+                .suffix("%"),
+        )
+        .on_hover_text("Brightness pulses on each beat. Lower this if it's too flashy.")
+        .changed()
+    {
+        settings.flash = percent / 100.0;
     }
 }
 
