@@ -24,6 +24,8 @@ pub const NAME: &str = "MilkDrop";
 /// projectM renders at most this tall; larger windows are scaled up, which
 /// keeps the per-frame copy cheap at 4K.
 const MAX_RENDER_HEIGHT: u32 = 1080;
+/// Stop auto-skipping failed presets after this many in a row.
+const MAX_SKIPS_IN_A_ROW: u32 = 10;
 const PRESETS_HINT: &str = "No preset folder set. Get presets (e.g. github.com/projectM-visualizer/presets-cream-of-the-crop) and choose the folder below.";
 
 pub struct MilkDrop {
@@ -37,6 +39,8 @@ pub struct MilkDrop {
     status: Option<String>,
     /// Text for the next toast (preset changes, load failures).
     message: Option<String>,
+    /// Consecutive presets that failed to load (reset by a user/timer change).
+    failures_in_a_row: u32,
     upload: Upload,
 }
 
@@ -66,6 +70,7 @@ impl MilkDrop {
             gain: 1.0,
             status: Some(PRESETS_HINT.to_owned()),
             message: None,
+            failures_in_a_row: 0,
             upload: Upload::new(device, render_size),
         })
     }
@@ -86,6 +91,7 @@ impl MilkDrop {
                 log::info!("{} MilkDrop presets in {}", found.len(), dir.display());
                 self.status = Some(format!("{} presets in {}", found.len(), dir.display()));
                 self.playlist = Playlist::new(found, shuffle, seed());
+                self.failures_in_a_row = 0;
                 self.advance(1, false);
             }
             Err(e) => self.status = Some(format!("Can't read preset folder: {e:#}")),
@@ -117,18 +123,28 @@ impl MilkDrop {
     fn handle_events(&mut self) {
         while let Some(event) = self.worker.try_event() {
             match event {
-                Event::LoadFailed { path, reason } => {
-                    let name = display_name(&path);
-                    log::warn!("MilkDrop preset {name} failed: {reason}");
-                    // Skip it rather than sit on the old preset.
-                    let next = self.advance(1, false);
-                    self.message = Some(match next {
-                        Some(next) => format!("Skipped broken preset {name}\n{NAME}: {next}"),
-                        None => format!("Couldn't load preset {name}"),
-                    });
-                }
+                Event::LoadFailed { path } => self.on_load_failed(&path),
             }
         }
+    }
+
+    /// Skips a preset projectM couldn't load, unless many have failed in a
+    /// row (e.g. a folder of incompatible presets), to avoid looping forever.
+    fn on_load_failed(&mut self, path: &std::path::Path) {
+        let name = display_name(path);
+        log::warn!("MilkDrop couldn't load preset {name}");
+        self.failures_in_a_row += 1;
+        if self.failures_in_a_row >= MAX_SKIPS_IN_A_ROW {
+            self.message = Some(format!(
+                "{MAX_SKIPS_IN_A_ROW} presets in a row failed to load; stopped skipping"
+            ));
+            return;
+        }
+        let next = self.advance(1, false);
+        self.message = Some(match next {
+            Some(next) => format!("Skipped {name} (projectM can't load it)\n{NAME}: {next}"),
+            None => format!("Couldn't load preset {name}"),
+        });
     }
 }
 
@@ -153,16 +169,17 @@ impl Visualizer for MilkDrop {
         self.feed_audio(audio);
         self.handle_events();
         self.since_preset += dt;
-        if self.auto_change
-            && self.since_preset >= self.preset_secs
-            && self.playlist.len() > 1
-            && let Some(name) = self.advance(1, true)
-        {
-            self.message = Some(format!("{NAME}: {name}"));
+        let due = self.since_preset >= self.preset_secs;
+        if self.auto_change && due && self.playlist.len() > 1 {
+            self.failures_in_a_row = 0;
+            if let Some(name) = self.advance(1, true) {
+                self.message = Some(format!("{NAME}: {name}"));
+            }
         }
     }
 
     fn step_preset(&mut self, direction: isize) -> Option<String> {
+        self.failures_in_a_row = 0;
         self.advance(direction, false)
     }
 

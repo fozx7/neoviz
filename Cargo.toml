@@ -40,6 +40,7 @@ libpulse-simple-binding = "2.29"
 glow = { version = "0.18", optional = true }
 khronos-egl = { version = "6", features = ["static"], optional = true }
 projectm = { version = "3.1", features = ["static"], optional = true }
+projectm-sys = { version = "1.2", optional = true }
 
 [target."cfg(windows)".dependencies]
 cpal = "0.18"
@@ -49,4 +50,4 @@ default = ["milkdrop"]
 # MilkDrop presets via libprojectM, Linux only (builds projectM v4 from source;
 # needs cmake, a C++ compiler and OpenGL/EGL headers). Build without it with
 # `--no-default-features`.
-milkdrop = ["dep:projectm", "dep:khronos-egl", "dep:glow"]
+milkdrop = ["dep:projectm", "dep:projectm-sys", "dep:khronos-egl", "dep:glow"]

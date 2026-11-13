@@ -6,7 +6,10 @@
 //! slot for the main thread to pick up.
 
 use std::{
-    path::PathBuf,
+    cell::Cell,
+    ffi::{CString, c_char, c_void},
+    panic::AssertUnwindSafe,
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         mpsc::{self, Receiver, Sender},
@@ -38,7 +41,9 @@ pub enum Command {
 }
 
 pub enum Event {
-    LoadFailed { path: PathBuf, reason: String },
+    /// projectM couldn't load this preset (under 1% of the cream-of-the-crop
+    /// pack: shader syntax it can't translate) and kept the previous one.
+    LoadFailed { path: PathBuf },
 }
 
 /// A rendered frame: RGBA8, bottom row first.
@@ -52,6 +57,8 @@ pub struct Worker {
     events: Receiver<Event>,
     frame: Arc<Mutex<Option<Frame>>>,
     thread: Option<JoinHandle<()>>,
+    /// Set once the thread is found dead, so that's only logged once.
+    reported_stop: Cell<bool>,
 }
 
 impl Worker {
@@ -74,14 +81,16 @@ impl Worker {
             events: event_rx,
             frame,
             thread: Some(thread),
+            reported_stop: Cell::new(false),
         })
     }
 
     pub fn send(&self, command: Command) {
         if let Some(tx) = &self.commands
             && tx.send(command).is_err()
+            && !self.reported_stop.replace(true)
         {
-            log::warn!("MilkDrop thread has stopped");
+            log::error!("MilkDrop thread has stopped; MilkDrop will stay frozen");
         }
     }
 
@@ -128,12 +137,7 @@ fn run(
     // We choose presets ourselves; stop projectM switching on its own.
     pm.set_preset_locked(true);
     pm.set_hard_cut_enabled(false);
-    pm.set_preset_switch_failed_event_callback(move |path, reason| {
-        let _ = events.send(Event::LoadFailed {
-            path: path.into(),
-            reason,
-        });
-    });
+    let load_failed = install_failure_hook(&pm);
     let max_floats = (ProjectM::pcm_get_max_samples() as usize & !1).max(2);
     let _ = ready.send(Ok(()));
 
@@ -151,7 +155,12 @@ fn run(
                     }
                 }
                 Command::Load { path, smooth } => {
-                    pm.load_preset_file(&path.to_string_lossy(), smooth);
+                    // The callback fires during this call if the load fails.
+                    load_failed.set(false);
+                    load_preset(&pm, &path, smooth);
+                    if load_failed.get() {
+                        let _ = events.send(Event::LoadFailed { path });
+                    }
                 }
                 Command::Render(size) => render = Some(size),
                 Command::Recycle(buffer) => spare.push(buffer),
@@ -161,8 +170,72 @@ fn run(
             render_frame(&pm, &mut gl, size, &slot, &mut spare);
         }
     }
-    // projectM must be destroyed while its context is still alive.
+    // projectM must be destroyed while its context is still alive, and
+    // before the flag its callback points at.
     drop(pm);
+    drop(load_failed);
+}
+
+/// Loads a preset file through the raw API.
+///
+/// The `projectm` crate's `load_preset_file` passes the Rust string without
+/// a terminating NUL, so projectM reads past the end of the path and loads
+/// fail at random (it saw extensions like ".milk\x01"). A `CString` fixes it,
+/// and also handles paths that aren't valid UTF-8.
+fn load_preset(pm: &ProjectM, path: &Path, smooth: bool) {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
+        log::warn!("skipping preset path with a NUL byte: {}", path.display());
+        return;
+    };
+    let handle = *pm.get_instance().borrow();
+    // SAFETY: `handle` is live, and `c_path` is NUL-terminated and outlives the call.
+    unsafe { projectm_sys::projectm_load_preset_file(handle, c_path.as_ptr(), smooth) };
+}
+
+/// Registers projectM's "preset failed to load" callback through the raw API,
+/// returning the flag it sets.
+///
+/// The callback deliberately ignores the filename and message projectM passes:
+/// in projectM 4.1.3 the filename pointer is often invalid by the time it's
+/// called (we saw garbage bytes), and the message is always just
+/// "std::exception". Reading them crashed the `projectm` crate's own wrapper,
+/// which also panics inside the C callback and so aborts the process. The
+/// worker knows which preset it was loading, so a flag is all it needs.
+fn install_failure_hook(pm: &ProjectM) -> Box<Cell<bool>> {
+    let flag = Box::new(Cell::new(false));
+    let handle = *pm.get_instance().borrow();
+    let user_data = std::ptr::from_ref::<Cell<bool>>(&flag)
+        .cast_mut()
+        .cast::<c_void>();
+    // SAFETY: `handle` is a live projectM instance; `user_data` points at the
+    // boxed flag, which the caller keeps alive until projectM is destroyed.
+    // projectM only calls back from inside our own calls on this thread.
+    unsafe {
+        projectm_sys::projectm_set_preset_switch_failed_event_callback(
+            handle,
+            Some(on_load_failed),
+            user_data,
+        );
+    }
+    flag
+}
+
+/// Called by projectM (from C++) when a preset fails to load. Never unwinds,
+/// and never reads the (unreliable) string arguments.
+unsafe extern "C" fn on_load_failed(
+    _preset_filename: *const c_char,
+    _message: *const c_char,
+    user_data: *mut c_void,
+) {
+    let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        if user_data.is_null() {
+            return;
+        }
+        // SAFETY: `user_data` is the boxed flag from `install_failure_hook`,
+        // used only on the worker thread that's calling into projectM.
+        unsafe { &*user_data.cast::<Cell<bool>>() }.set(true);
+    }));
 }
 
 fn render_frame(
@@ -190,5 +263,28 @@ fn render_frame(
     // Replace any frame the main thread hasn't collected; reuse its buffer.
     if let Some(stale) = slot.replace(Frame { pixels, size }) {
         spare.push(stale.pixels);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failure_callback_sets_the_flag_without_reading_the_strings() {
+        let flag = Box::new(Cell::new(false));
+        let user_data = std::ptr::from_ref::<Cell<bool>>(&flag)
+            .cast_mut()
+            .cast::<c_void>();
+        // Dangling, non-NUL-terminated "strings", like projectM sometimes passes.
+        let garbage = [0xFFu8, 0xFE, 0x41];
+        let ptr = garbage.as_ptr().cast::<c_char>();
+        unsafe { on_load_failed(ptr, ptr, user_data) };
+        assert!(flag.get());
+    }
+
+    #[test]
+    fn failure_callback_ignores_null_user_data() {
+        unsafe { on_load_failed(std::ptr::null(), std::ptr::null(), std::ptr::null_mut()) };
     }
 }

@@ -1795,6 +1795,7 @@ dependencies = [
  "log",
  "pollster",
  "projectm",
+ "projectm-sys",
  "realfft",
  "rtrb",
  "serde",
