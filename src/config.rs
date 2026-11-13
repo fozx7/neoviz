@@ -68,6 +68,9 @@ pub struct Settings {
     pub flash: f32,
     /// Keep the screen from blanking while visualizing.
     pub keep_awake: KeepAwake,
+    /// Fade the picture to black when the audio goes silent, and back in
+    /// when sound returns.
+    pub fade_on_silence: bool,
 }
 
 impl Default for Settings {
@@ -93,6 +96,7 @@ impl Default for Settings {
             speed: 1.0,
             flash: 1.0,
             keep_awake: KeepAwake::default(),
+            fade_on_silence: true,
         }
     }
 }

@@ -245,6 +245,13 @@ fn display_section(ui: &mut egui::Ui, settings: &mut Settings, keeping_awake: bo
         ui.checkbox(&mut settings.always_on_top, "Always on top");
         ui.checkbox(&mut settings.borderless, "Borderless window");
     });
+    ui.checkbox(
+        &mut settings.fade_on_silence,
+        "Fade out when the music stops",
+    )
+    .on_hover_text(
+        "Fade to black after a couple of seconds of silence, and back in when sound returns.",
+    );
     ui.horizontal(|ui| {
         ui.label("Keep screen on");
         let options = [

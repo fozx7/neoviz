@@ -13,6 +13,7 @@ use winit::{
 
 use super::{
     awake::Awake,
+    fade::SilenceFade,
     layout::{self, Rect},
 };
 
@@ -86,6 +87,7 @@ pub struct Session {
     locked: bool,
     toast: Option<Toast>,
     awake: Awake,
+    fade: SilenceFade,
     fps: f32,
     last_frame: Instant,
 }
@@ -129,6 +131,7 @@ impl Session {
             show_settings: false,
             locked: false,
             awake: Awake::default(),
+            fade: SilenceFade::default(),
             fps: 60.0,
             last_frame: Instant::now(),
             displays: vec![main],
@@ -360,6 +363,7 @@ impl Session {
             (audio.beat.then_some(audio.beat_intensity), audio.silent)
         };
         self.awake.update(self.settings.keep_awake, silent, dt);
+        self.fade.update(self.settings.fade_on_silence, silent, dt);
         if self.settings.random_mode
             && !self.locked
             && self.auto_switch.tick(
@@ -438,7 +442,9 @@ impl Session {
                 self.compositor.slot(INCOMING),
                 size,
             );
-            self.compositor.draw(queue, &mut encoder, canvas, mix, post);
+            let brightness = self.fade.brightness();
+            self.compositor
+                .draw(queue, &mut encoder, canvas, mix, post, brightness);
         }
 
         let mut frames = Vec::with_capacity(self.displays.len());
@@ -559,6 +565,9 @@ impl Session {
 
     fn toggle_lock(&mut self) {
         self.locked = !self.locked;
+        for v in &mut self.visualizers {
+            v.set_locked(self.locked);
+        }
         let text = if self.locked { "Locked" } else { "Unlocked" };
         self.toast = Some(Toast::new(text));
     }

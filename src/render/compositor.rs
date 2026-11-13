@@ -89,7 +89,8 @@ impl Compositor {
     }
 
     /// Blends `mix_amount` (0 = outgoing only, 1 = incoming only) of the two
-    /// slots, applies `post`, and writes the result to `target`.
+    /// slots, applies `post`, scales it by `brightness` (0 = black, 1 = as
+    /// drawn), and writes the result to `target`.
     pub fn draw(
         &self,
         queue: &wgpu::Queue,
@@ -97,6 +98,7 @@ impl Compositor {
         target: &wgpu::TextureView,
         mix_amount: f32,
         post: PostFx,
+        brightness: f32,
     ) {
         let (p, f) = (&self.p, &self.frame);
         p.mix_params.write(queue, [mix_amount, 0.0, 0.0, 0.0]);
@@ -138,7 +140,8 @@ impl Compositor {
 
         let strength = if post.bloom { BLOOM_STRENGTH } else { 0.0 };
         let scanlines = f32::from(u8::from(post.scanlines));
-        p.final_params.write(queue, [strength, scanlines, 0.0, 0.0]);
+        p.final_params
+            .write(queue, [strength, scanlines, brightness, 0.0]);
         draw_fullscreen(
             encoder,
             "final",

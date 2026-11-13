@@ -2,6 +2,7 @@
 //! [`Session`].
 
 mod awake;
+mod fade;
 mod layout;
 mod session;
 

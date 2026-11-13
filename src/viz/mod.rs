@@ -40,6 +40,10 @@ pub trait Visualizer {
         None
     }
 
+    /// The user locked (`Space`) or unlocked the current visualizer. While
+    /// locked, a visualizer with its own presets must not change them on a timer.
+    fn set_locked(&mut self, _locked: bool) {}
+
     /// A message to show as a toast (e.g. "switched to preset X"), taken once.
     fn take_message(&mut self) -> Option<String> {
         None

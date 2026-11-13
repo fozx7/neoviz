@@ -35,6 +35,8 @@ pub struct MilkDrop {
     auto_change: bool,
     preset_secs: f32,
     since_preset: f32,
+    /// Locked by the user (`Space`): no automatic preset changes.
+    locked: bool,
     gain: f32,
     status: Option<String>,
     /// Text for the next toast (preset changes, load failures).
@@ -67,6 +69,7 @@ impl MilkDrop {
             auto_change: defaults.preset_auto,
             preset_secs: defaults.preset_secs,
             since_preset: 0.0,
+            locked: false,
             gain: 1.0,
             status: Some(PRESETS_HINT.to_owned()),
             message: None,
@@ -169,8 +172,12 @@ impl Visualizer for MilkDrop {
         self.feed_audio(audio);
         self.handle_events();
         self.since_preset += dt;
-        let due = self.since_preset >= self.preset_secs;
-        if self.auto_change && due && self.playlist.len() > 1 {
+        if should_auto_change(
+            self.auto_change && !self.locked,
+            self.since_preset,
+            self.preset_secs,
+            self.playlist.len(),
+        ) {
             self.failures_in_a_row = 0;
             if let Some(name) = self.advance(1, true) {
                 self.message = Some(format!("{NAME}: {name}"));
@@ -181,6 +188,12 @@ impl Visualizer for MilkDrop {
     fn step_preset(&mut self, direction: isize) -> Option<String> {
         self.failures_in_a_row = 0;
         self.advance(direction, false)
+    }
+
+    fn set_locked(&mut self, locked: bool) {
+        self.locked = locked;
+        // A full interval on the current preset after unlocking, not an instant change.
+        self.since_preset = 0.0;
     }
 
     fn status(&self) -> Option<String> {
@@ -327,6 +340,12 @@ fn render_size(size: (u32, u32)) -> (u32, u32) {
     )
 }
 
+/// Whether the preset timer should move on: auto-change `enabled` (on and
+/// not locked), the interval is up, and there's another preset to go to.
+fn should_auto_change(enabled: bool, since_preset: f32, preset_secs: f32, presets: usize) -> bool {
+    enabled && since_preset >= preset_secs && presets > 1
+}
+
 fn seed() -> u32 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -347,6 +366,22 @@ mod tests {
     fn render_size_caps_4k_at_1080p_keeping_aspect() {
         assert_eq!(render_size((3840, 2160)), (1920, 1080));
         assert_eq!(render_size((5120, 1440)), (3840, 1080));
+    }
+
+    #[test]
+    fn auto_change_waits_for_the_interval() {
+        assert!(!should_auto_change(true, 29.9, 30.0, 5));
+        assert!(should_auto_change(true, 30.0, 30.0, 5));
+    }
+
+    #[test]
+    fn auto_change_never_fires_when_disabled_or_locked() {
+        assert!(!should_auto_change(false, 999.0, 30.0, 5));
+    }
+
+    #[test]
+    fn auto_change_needs_another_preset() {
+        assert!(!should_auto_change(true, 999.0, 30.0, 1));
     }
 
     #[test]
