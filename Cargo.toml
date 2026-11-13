@@ -18,9 +18,14 @@ wgpu = "30"
 winit = "0.30"
 
 [profile.release]
+strip = true
+
+# Slower to build (~35 s vs ~7 s for the final crate) but a bit smaller and
+# faster. For packaged binaries: `cargo build --profile dist`.
+[profile.dist]
+inherits = "release"
 lto = "thin"
 codegen-units = 1
-strip = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libpulse-binding = "2.30"
