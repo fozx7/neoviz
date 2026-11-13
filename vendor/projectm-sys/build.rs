@@ -1,6 +1,8 @@
 // Patched for neoViz (see vendor/README.md). Windows changes only:
 // - projectM is always built in Release, so it uses the same C runtime (/MD)
 //   as Rust; a Debug build (/MDd) can't be mixed with it.
+// - The CMake generator isn't hard-coded to Visual Studio 2022, so any
+//   installed version (e.g. 2026) works.
 // - projectM's vendored projectm-eval is used (as on Linux), so vcpkg only
 //   has to provide GLEW.
 // - Static libraries are linked by their real names (projectM's CMake adds
@@ -96,7 +98,8 @@ fn main() {
         // Configure and build libprojectM using CMake for Windows
         let mut cmake_config = cmake::Config::new(&projectm_path);
         cmake_config
-            .generator("Visual Studio 17 2022")
+            // No fixed generator: the cmake crate picks the installed
+            // Visual Studio (or CMAKE_GENERATOR, if set).
             .profile("Release")
             .define("CMAKE_TOOLCHAIN_FILE", vcpkg_toolchain_str)
             .define("VCPKG_TARGET_TRIPLET", "x64-windows-static-md")

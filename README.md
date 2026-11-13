@@ -44,7 +44,7 @@ The Rust toolchain (MSVC) is enough without MilkDrop (`--no-default-features`). 
 neoViz plays MilkDrop presets through [libprojectM](https://github.com/projectM-visualizer/projectm), which is built from source as part of the normal build. The first build takes longer.
 
 - **Linux:** you need `cmake`, a C++ compiler and the OpenGL/EGL headers. On Arch these come with `base-devel`, `cmake` and `mesa`; on Debian/Ubuntu install `cmake g++ libegl-dev libgl-dev`.
-- **Windows:** you need Visual Studio 2022 (C++ workload), CMake, LLVM (for `libclang`), and [vcpkg](https://vcpkg.io) with `VCPKG_INSTALLATION_ROOT` pointing at it. vcpkg fetches GLEW by itself during the build. The repo carries a patched `projectm-sys` for this (see [vendor/README.md](vendor/README.md)).
+- **Windows:** you need Visual Studio 2022 or later (C++ workload), CMake, LLVM (for `libclang`), and [vcpkg](https://vcpkg.io) with `VCPKG_INSTALLATION_ROOT` pointing at it. vcpkg fetches GLEW by itself during the build. The repo carries a patched `projectm-sys` for this (see [vendor/README.md](vendor/README.md)).
 
 ```sh
 cargo run --release -- --presets ~/milkdrop-presets
