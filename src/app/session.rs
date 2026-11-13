@@ -11,7 +11,10 @@ use winit::{
     window::{Fullscreen, Window, WindowId, WindowLevel},
 };
 
-use super::layout::{self, Rect};
+use super::{
+    awake::Awake,
+    layout::{self, Rect},
+};
 
 use crate::{
     audio::{
@@ -82,6 +85,7 @@ pub struct Session {
     show_settings: bool,
     locked: bool,
     toast: Option<Toast>,
+    awake: Awake,
     fps: f32,
     last_frame: Instant,
 }
@@ -124,6 +128,7 @@ impl Session {
             show_debug: false,
             show_settings: false,
             locked: false,
+            awake: Awake::default(),
             fps: 60.0,
             last_frame: Instant::now(),
             displays: vec![main],
@@ -350,10 +355,11 @@ impl Session {
         let sample_rate = self.capture.sample_rate();
         self.analyzer.ingest(&mut self.capture.consumer);
         self.analyzer.analyze(sample_rate, dt);
-        let beat = {
+        let (beat, silent) = {
             let audio = self.analyzer.frame();
-            audio.beat.then_some(audio.beat_intensity)
+            (audio.beat.then_some(audio.beat_intensity), audio.silent)
         };
+        self.awake.update(self.settings.keep_awake, silent, dt);
         if self.settings.random_mode
             && !self.locked
             && self.auto_switch.tick(
@@ -476,6 +482,7 @@ impl Session {
                 .iter()
                 .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s)))
                 .collect(),
+            keeping_awake: self.awake.is_holding(),
         };
         let hud = Hud {
             toast: self.toast.as_ref(),

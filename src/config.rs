@@ -17,6 +17,18 @@ pub const AUTO_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
 pub const PRESET_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
 pub const SPEED_RANGE: (f32, f32) = (0.25, 2.0);
 
+/// When to stop the screen blanking or locking.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeepAwake {
+    Off,
+    /// While there's sound (released after a minute of silence), like a video player.
+    #[default]
+    WhilePlaying,
+    /// Whenever neoViz is open.
+    Always,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -54,6 +66,8 @@ pub struct Settings {
     pub speed: f32,
     /// Strength of the colour flash on each beat, 0..1.
     pub flash: f32,
+    /// Keep the screen from blanking while visualizing.
+    pub keep_awake: KeepAwake,
 }
 
 impl Default for Settings {
@@ -78,6 +92,7 @@ impl Default for Settings {
             preset_shuffle: true,
             speed: 1.0,
             flash: 1.0,
+            keep_awake: KeepAwake::default(),
         }
     }
 }
@@ -220,6 +235,22 @@ mod tests {
         let s = Settings::from_toml("bloom = true").unwrap();
         assert_eq!(s.speed, 1.0);
         assert_eq!(s.flash, 1.0);
+    }
+
+    #[test]
+    fn keep_awake_reads_and_writes_readable_names() {
+        let s = Settings::from_toml("keep_awake = \"always\"").unwrap();
+        assert_eq!(s.keep_awake, KeepAwake::Always);
+        let s = Settings {
+            keep_awake: KeepAwake::WhilePlaying,
+            ..Default::default()
+        };
+        assert!(
+            s.to_toml()
+                .unwrap()
+                .contains("keep_awake = \"while_playing\"")
+        );
+        assert_eq!(Settings::default().keep_awake, KeepAwake::WhilePlaying);
     }
 
     #[test]

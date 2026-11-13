@@ -1,6 +1,7 @@
 //! The winit event loop handler: creates the window and routes events to the
 //! [`Session`].
 
+mod awake;
 mod layout;
 mod session;
 

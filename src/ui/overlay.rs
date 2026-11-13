@@ -6,7 +6,9 @@ use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
 
 use crate::{
     audio::{DeviceInfo, analysis::GAIN_LIMIT_DB},
-    config::{AUTO_SWITCH_RANGE, PRESET_SWITCH_RANGE, SMOOTHING_RANGE, SPEED_RANGE, Settings},
+    config::{
+        AUTO_SWITCH_RANGE, KeepAwake, PRESET_SWITCH_RANGE, SMOOTHING_RANGE, SPEED_RANGE, Settings,
+    },
 };
 
 use super::Toast;
@@ -22,6 +24,8 @@ pub struct PanelInfo<'a> {
     pub config_path: Option<&'a Path>,
     /// (visualizer name, status line) for visualizers with something to report.
     pub statuses: Vec<(String, String)>,
+    /// Whether the screen is currently being kept on.
+    pub keeping_awake: bool,
 }
 
 /// Things the user asked for in the panel that aren't plain settings.
@@ -63,7 +67,7 @@ pub fn settings_panel(
                 }
                 motion_section(ui, settings);
                 ui.separator();
-                display_section(ui, settings);
+                display_section(ui, settings, info.keeping_awake);
                 ui.separator();
                 footer(ui, info);
             });
@@ -230,7 +234,7 @@ fn motion_section(ui: &mut egui::Ui, settings: &mut Settings) {
     }
 }
 
-fn display_section(ui: &mut egui::Ui, settings: &mut Settings) {
+fn display_section(ui: &mut egui::Ui, settings: &mut Settings, keeping_awake: bool) {
     ui.heading("Display");
     ui.horizontal(|ui| {
         ui.checkbox(&mut settings.bloom, "Bloom");
@@ -240,6 +244,30 @@ fn display_section(ui: &mut egui::Ui, settings: &mut Settings) {
     ui.horizontal(|ui| {
         ui.checkbox(&mut settings.always_on_top, "Always on top");
         ui.checkbox(&mut settings.borderless, "Borderless window");
+    });
+    ui.horizontal(|ui| {
+        ui.label("Keep screen on");
+        let options = [
+            (KeepAwake::WhilePlaying, "While music plays"),
+            (KeepAwake::Always, "Always"),
+            (KeepAwake::Off, "Off"),
+        ];
+        let current = options
+            .iter()
+            .find(|(mode, _)| *mode == settings.keep_awake)
+            .map_or("", |(_, label)| label);
+        egui::ComboBox::from_id_salt("keep_awake")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for (mode, label) in options {
+                    ui.selectable_value(&mut settings.keep_awake, mode, label);
+                }
+            })
+            .response
+            .on_hover_text("Stop the screen blanking or locking, like a playing video. \"While music plays\" lets it sleep after a minute of silence.");
+        if keeping_awake {
+            ui.weak("(on now)");
+        }
     });
 }
 

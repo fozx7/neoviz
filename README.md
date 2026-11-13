@@ -87,6 +87,8 @@ You can also pick the device in the settings overlay (`Tab`).
 
 Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy Particles, Classic Lightshow, Starfield Warp, then variants: LED Bars, Ring Scope, Mirror Bars, Stereo X/Y.
 
+**Keep screen on** (overlay → Display): by default neoViz stops the screen blanking or locking while music plays, like a video player, and lets it sleep after a minute of silence. Set it to *Always* or *Off* if you prefer.
+
 Too fast or too flashy? In the overlay's **Motion** section, *Speed* slows the visualizers' own movement and colour cycling (0.25×–2×), and *Beat flashes* tones down the pulse on each beat. MilkDrop presets keep their own pace.
 
 **Span mode on KDE Plasma (Wayland):** by default KWin gives a newly opened window focus, and when it closes, passes focus only to windows on the *same* monitor. So after leaving span mode, neoViz may need a click before keys work again. To avoid that, turn off *System Settings → Window Management → Window Behavior → Focus → Separate screen focus*.
