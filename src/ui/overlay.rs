@@ -188,15 +188,17 @@ fn milkdrop_section(
             requests.rescan_presets = true;
         }
     });
-    ui.add(
-        egui::Slider::new(
-            &mut settings.preset_secs,
-            PRESET_SWITCH_RANGE.0..=PRESET_SWITCH_RANGE.1,
-        )
-        .text("Change preset every")
-        .suffix(" s")
-        .logarithmic(true),
-    );
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut settings.preset_auto, "Change preset every");
+        ui.add_enabled(
+            settings.preset_auto,
+            egui::DragValue::new(&mut settings.preset_secs)
+                .range(PRESET_SWITCH_RANGE.0..=PRESET_SWITCH_RANGE.1)
+                .speed(1.0)
+                .suffix(" s"),
+        );
+    });
+    ui.checkbox(&mut settings.preset_shuffle, "Shuffle (random order)");
     for (name, status) in &info.statuses {
         ui.label(format!("{name}: {status}"));
     }

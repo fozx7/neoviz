@@ -1,48 +1,42 @@
 //! MilkDrop presets via libprojectM.
 //!
-//! projectM only speaks OpenGL, so it renders into a hidden OpenGL context
-//! ([`HeadlessGl`]); each frame is read back and uploaded as a wgpu texture.
-//! That makes MilkDrop an ordinary visualizer: crossfades, bloom and the
-//! overlay all work on top of it.
+//! projectM only speaks OpenGL, so it renders on its own thread into a hidden
+//! OpenGL context (see [`worker`]); finished frames are uploaded as a wgpu
+//! texture. That makes MilkDrop an ordinary visualizer: crossfades, bloom and
+//! the overlay all work on top of it.
 
 mod presets;
-
-use std::path::Path;
+mod worker;
 
 use anyhow::Result;
-use projectm::core::ProjectM;
 
 use crate::{
     audio::analysis::AudioFrame,
     config::Settings,
-    render::{
-        common::{HDR_FORMAT, draw_fullscreen, entry, fullscreen_pipeline, linear_sampler},
-        headless_gl::HeadlessGl,
-    },
+    render::common::{HDR_FORMAT, draw_fullscreen, entry, fullscreen_pipeline, linear_sampler},
 };
 
 use super::Visualizer;
 use presets::{Playlist, display_name};
+use worker::{Command, Event, Worker};
 
 pub const NAME: &str = "MilkDrop";
 /// projectM renders at most this tall; larger windows are scaled up, which
 /// keeps the per-frame copy cheap at 4K.
 const MAX_RENDER_HEIGHT: u32 = 1080;
-const RENDER_FPS: u32 = 60;
 const PRESETS_HINT: &str = "No preset folder set. Get presets (e.g. github.com/projectM-visualizer/presets-cream-of-the-crop) and choose the folder below.";
 
 pub struct MilkDrop {
-    // Field order matters: projectM must be dropped while its GL context exists.
-    pm: ProjectM,
-    gl: HeadlessGl,
+    worker: Worker,
     playlist: Playlist,
     preset_dir: String,
+    auto_change: bool,
     preset_secs: f32,
     since_preset: f32,
     gain: f32,
     status: Option<String>,
-    pcm: Vec<f32>,
-    pixels: Vec<u8>,
+    /// Text for the next toast (preset changes, load failures).
+    message: Option<String>,
     upload: Upload,
 }
 
@@ -61,81 +55,79 @@ struct Upload {
 impl MilkDrop {
     pub fn new(device: &wgpu::Device, size: (u32, u32)) -> Result<Self> {
         let render_size = render_size(size);
-        let gl = HeadlessGl::new(render_size)?;
-        // projectM needs its GL context current when it's created.
-        let pm = ProjectM::create();
-        pm.set_window_size(render_size.0 as usize, render_size.1 as usize);
-        pm.set_fps(RENDER_FPS);
-        // We choose presets ourselves; stop projectM switching on its own.
-        pm.set_preset_locked(true);
-        pm.set_hard_cut_enabled(false);
+        let defaults = Settings::default();
         Ok(Self {
-            pm,
-            gl,
-            playlist: Playlist::new(Vec::new(), 1),
+            worker: Worker::start(render_size)?,
+            playlist: Playlist::new(Vec::new(), defaults.preset_shuffle, 1),
             preset_dir: String::new(),
-            preset_secs: Settings::default().preset_secs,
+            auto_change: defaults.preset_auto,
+            preset_secs: defaults.preset_secs,
             since_preset: 0.0,
             gain: 1.0,
             status: Some(PRESETS_HINT.to_owned()),
-            pcm: Vec::new(),
-            pixels: Vec::new(),
+            message: None,
             upload: Upload::new(device, render_size),
         })
     }
 
-    fn rescan(&mut self) {
-        self.playlist = Playlist::new(Vec::new(), seed());
+    fn rescan(&mut self, shuffle: bool) {
+        self.playlist = Playlist::new(Vec::new(), shuffle, seed());
         if self.preset_dir.trim().is_empty() {
             self.status = Some(PRESETS_HINT.to_owned());
             return;
         }
         let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf());
         let dir = presets::expand_home(&self.preset_dir, home.as_deref());
-        let dir = dir.as_path();
-        match presets::scan(dir) {
+        match presets::scan(&dir) {
             Ok(found) if found.is_empty() => {
                 self.status = Some(format!("No .milk presets found in {}", dir.display()));
             }
             Ok(found) => {
                 log::info!("{} MilkDrop presets in {}", found.len(), dir.display());
                 self.status = Some(format!("{} presets in {}", found.len(), dir.display()));
-                self.playlist = Playlist::new(found, seed());
-                self.load_random(false);
+                self.playlist = Playlist::new(found, shuffle, seed());
+                self.advance(1, false);
             }
             Err(e) => self.status = Some(format!("Can't read preset folder: {e:#}")),
         }
     }
 
-    fn load_random(&mut self, smooth: bool) {
-        if let Some(path) = self.playlist.random().map(Path::to_path_buf) {
-            self.load(&path, smooth);
-        }
-    }
-
-    fn load(&mut self, path: &Path, smooth: bool) {
-        if let Err(e) = self.gl.make_current() {
-            log::warn!("MilkDrop: {e:#}");
-            return;
-        }
-        log::info!("MilkDrop preset: {}", display_name(path));
-        self.pm.load_preset_file(&path.to_string_lossy(), smooth);
+    /// Moves through the playlist and starts loading that preset. Returns its name.
+    fn advance(&mut self, direction: isize, smooth: bool) -> Option<String> {
+        let path = self.playlist.step(direction)?.to_path_buf();
+        let name = display_name(&path);
+        log::info!("MilkDrop preset: {name}");
+        self.worker.send(Command::Load { path, smooth });
         self.since_preset = 0.0;
+        Some(name)
     }
 
-    /// Hands projectM this frame's new audio, interleaved stereo.
+    /// Sends projectM this frame's new audio, interleaved stereo.
     fn feed_audio(&mut self, audio: &AudioFrame) {
-        let n = audio.new_frames;
-        let start = audio.left.len() - n;
-        self.pcm.clear();
-        for (l, r) in audio.left[start..].iter().zip(&audio.right[start..]) {
-            self.pcm.push((l * self.gain).clamp(-1.0, 1.0));
-            self.pcm.push((r * self.gain).clamp(-1.0, 1.0));
-        }
-        // projectM takes a limited number of floats per call; keep frames whole.
-        let max = (ProjectM::pcm_get_max_samples() as usize) & !1;
-        for chunk in self.pcm.chunks(max.max(2)) {
-            self.pm.pcm_add_float(chunk, 2);
+        let start = audio.left.len() - audio.new_frames;
+        let gain = self.gain;
+        let pcm = audio.left[start..]
+            .iter()
+            .zip(&audio.right[start..])
+            .flat_map(|(l, r)| [(l * gain).clamp(-1.0, 1.0), (r * gain).clamp(-1.0, 1.0)])
+            .collect();
+        self.worker.send(Command::Audio(pcm));
+    }
+
+    fn handle_events(&mut self) {
+        while let Some(event) = self.worker.try_event() {
+            match event {
+                Event::LoadFailed { path, reason } => {
+                    let name = display_name(&path);
+                    log::warn!("MilkDrop preset {name} failed: {reason}");
+                    // Skip it rather than sit on the old preset.
+                    let next = self.advance(1, false);
+                    self.message = Some(match next {
+                        Some(next) => format!("Skipped broken preset {name}\n{NAME}: {next}"),
+                        None => format!("Couldn't load preset {name}"),
+                    });
+                }
+            }
         }
     }
 }
@@ -147,30 +139,39 @@ impl Visualizer for MilkDrop {
 
     fn configure(&mut self, settings: &Settings, rescan: bool) {
         self.gain = 10f32.powf(settings.sensitivity_db / 20.0);
+        self.auto_change = settings.preset_auto;
         self.preset_secs = settings.preset_secs;
         self.preset_dir = settings.preset_dir.clone();
+        self.playlist.set_shuffle(settings.preset_shuffle);
         // Only on request: the folder field changes on every keystroke.
         if rescan {
-            self.rescan();
+            self.rescan(settings.preset_shuffle);
         }
     }
 
     fn update(&mut self, audio: &AudioFrame, dt: f32) {
         self.feed_audio(audio);
+        self.handle_events();
         self.since_preset += dt;
-        if self.since_preset >= self.preset_secs && self.playlist.len() > 1 {
-            self.load_random(true);
+        if self.auto_change
+            && self.since_preset >= self.preset_secs
+            && self.playlist.len() > 1
+            && let Some(name) = self.advance(1, true)
+        {
+            self.message = Some(format!("{NAME}: {name}"));
         }
     }
 
     fn step_preset(&mut self, direction: isize) -> Option<String> {
-        let path = self.playlist.step(direction)?.to_path_buf();
-        self.load(&path, false);
-        Some(display_name(&path))
+        self.advance(direction, false)
     }
 
     fn status(&self) -> Option<String> {
         self.status.clone()
+    }
+
+    fn take_message(&mut self) -> Option<String> {
+        self.message.take()
     }
 
     fn render(
@@ -180,20 +181,11 @@ impl Visualizer for MilkDrop {
         target: &wgpu::TextureView,
         size: (u32, u32),
     ) {
-        let wanted = render_size(size);
-        let ready = self.gl.make_current().and_then(|()| self.gl.resize(wanted));
-        if let Err(e) = ready {
-            log::warn!("MilkDrop: {e:#}");
-            return;
-        }
-        let actual = self.gl.size();
-        self.pm
-            .set_window_size(actual.0 as usize, actual.1 as usize);
-        self.pm.render_frame();
-        // Shows the previous frame (one frame behind); keeps the last image
-        // until the first frame after a resize arrives.
-        if self.gl.read_previous_frame(&mut self.pixels) {
-            self.upload.write(queue, &self.pixels, actual);
+        self.worker.send(Command::Render(render_size(size)));
+        // Frames arrive a little behind; until a new one does, the last stays up.
+        if let Some(frame) = self.worker.take_frame() {
+            self.upload.write(queue, &frame.pixels, frame.size);
+            self.worker.send(Command::Recycle(frame.pixels));
         }
         draw_fullscreen(
             encoder,
@@ -235,6 +227,9 @@ impl Upload {
 
     /// Uploads one RGBA8 frame, resizing the texture if the frame size changed.
     fn write(&mut self, queue: &wgpu::Queue, pixels: &[u8], size: (u32, u32)) {
+        if pixels.len() != size.0 as usize * size.1 as usize * 4 {
+            return;
+        }
         if size != self.size {
             (self.texture, self.bind_group) =
                 make_texture(&self.device, &self.layout, &self.sampler, size);

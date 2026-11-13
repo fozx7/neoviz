@@ -76,53 +76,97 @@ pub fn display_name(path: &Path) -> String {
     )
 }
 
-/// The presets available and which one is playing.
+/// The presets available, the order they play in, and where we are.
+///
+/// In shuffle mode the order is a random permutation, so stepping forward
+/// visits every preset once before any repeats, and stepping back returns to
+/// the previous one. Otherwise it's the sorted (folder) order.
 #[derive(Debug, Clone)]
 pub struct Playlist {
     presets: Vec<PathBuf>,
-    current: Option<usize>,
+    order: Vec<usize>,
+    /// Index into `order` of the preset playing now.
+    pos: Option<usize>,
+    shuffle: bool,
     rng: Rng,
 }
 
 impl Playlist {
-    pub fn new(presets: Vec<PathBuf>, seed: u32) -> Self {
-        Self {
+    pub fn new(presets: Vec<PathBuf>, shuffle: bool, seed: u32) -> Self {
+        let mut p = Self {
+            order: (0..presets.len()).collect(),
             presets,
-            current: None,
+            pos: None,
+            shuffle,
             rng: Rng::new(seed),
+        };
+        if shuffle {
+            p.reshuffle(None);
         }
+        p
     }
 
     pub fn len(&self) -> usize {
         self.presets.len()
     }
 
-    /// Moves to a random preset other than the current one.
-    pub fn random(&mut self) -> Option<&Path> {
+    pub fn current(&self) -> Option<&Path> {
+        self.pos.map(|i| self.presets[self.order[i]].as_path())
+    }
+
+    /// Switches between shuffled and sorted order, keeping the current preset.
+    pub fn set_shuffle(&mut self, shuffle: bool) {
+        if shuffle == self.shuffle {
+            return;
+        }
+        self.shuffle = shuffle;
+        let current = self.pos.map(|i| self.order[i]);
+        if shuffle {
+            self.reshuffle(current);
+        } else {
+            self.order = (0..self.presets.len()).collect();
+        }
+        self.pos = current.and_then(|c| self.order.iter().position(|&i| i == c));
+    }
+
+    /// Moves `direction` (+1 next, -1 previous) and returns the new preset.
+    /// The first move starts somewhere random.
+    pub fn step(&mut self, direction: isize) -> Option<&Path> {
         let n = self.presets.len();
         if n == 0 {
             return None;
         }
-        let mut pick = self.rng.next_u32() as usize % n;
-        if n > 1 && Some(pick) == self.current {
-            pick = (pick + 1) % n;
-        }
-        self.current = Some(pick);
-        Some(&self.presets[pick])
+        let next = match self.pos {
+            // A shuffled order is already random; folder order starts anywhere.
+            None if self.shuffle => 0,
+            None => self.rng.next_u32() as usize % n,
+            Some(i) if direction >= 0 && i + 1 == n && self.shuffle => {
+                // Finished a full pass: new random order, not starting with this one.
+                let current = self.order[i];
+                self.reshuffle(None);
+                if n > 1 && self.order[0] == current {
+                    self.order.swap(0, n - 1);
+                }
+                0
+            }
+            Some(i) => (i as isize + direction.signum()).rem_euclid(n as isize) as usize,
+        };
+        self.pos = Some(next);
+        self.current()
     }
 
-    /// Moves `direction` (+1 / -1) through the sorted list, wrapping.
-    pub fn step(&mut self, direction: isize) -> Option<&Path> {
-        let n = self.presets.len() as isize;
-        if n == 0 {
-            return None;
+    /// Fisher-Yates shuffle of the play order; `keep_first` goes to the front.
+    fn reshuffle(&mut self, keep_first: Option<usize>) {
+        self.order = (0..self.presets.len()).collect();
+        for i in (1..self.order.len()).rev() {
+            let j = self.rng.next_u32() as usize % (i + 1);
+            self.order.swap(i, j);
         }
-        let next = match self.current {
-            Some(i) => (i as isize + direction.signum()).rem_euclid(n),
-            None => 0,
-        } as usize;
-        self.current = Some(next);
-        Some(&self.presets[next])
+        if let Some(first) = keep_first
+            && let Some(at) = self.order.iter().position(|&i| i == first)
+        {
+            self.order.swap(0, at);
+        }
     }
 }
 
@@ -195,37 +239,83 @@ mod tests {
         );
     }
 
+    fn names(n: usize) -> Vec<PathBuf> {
+        (0..n).map(|i| PathBuf::from(format!("p{i:03}"))).collect()
+    }
+
     #[test]
     fn empty_playlist_has_nothing_to_play() {
-        let mut p = Playlist::new(Vec::new(), 1);
+        let mut p = Playlist::new(Vec::new(), true, 1);
         assert_eq!(p.len(), 0);
-        assert!(p.random().is_none());
         assert!(p.step(1).is_none());
+        assert!(p.current().is_none());
     }
 
     #[test]
-    fn step_starts_at_the_first_preset_and_wraps() {
-        let mut p = Playlist::new(vec!["a".into(), "b".into(), "c".into()], 1);
-        assert_eq!(p.step(1).unwrap(), Path::new("a"));
-        assert_eq!(p.step(-1).unwrap(), Path::new("c"));
-        assert_eq!(p.step(1).unwrap(), Path::new("a"));
+    fn sorted_mode_steps_in_folder_order_and_wraps() {
+        let mut p = Playlist::new(names(3), false, 1);
+        let first = p.step(1).unwrap().to_path_buf();
+        let i: usize = first.to_string_lossy()[1..].parse().unwrap();
+        assert_eq!(p.step(1).unwrap(), names(3)[(i + 1) % 3]);
+        assert_eq!(p.step(-1).unwrap(), first);
     }
 
     #[test]
-    fn random_never_repeats_the_current_preset() {
-        let mut p = Playlist::new(vec!["a".into(), "b".into()], 7);
-        let mut last = p.random().unwrap().to_path_buf();
-        for _ in 0..50 {
-            let next = p.random().unwrap().to_path_buf();
-            assert_ne!(next, last);
-            last = next;
+    fn shuffle_visits_every_preset_once_per_pass() {
+        let mut p = Playlist::new(names(50), true, 9);
+        let mut seen: Vec<PathBuf> = (0..50).map(|_| p.step(1).unwrap().to_path_buf()).collect();
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 50);
+    }
+
+    #[test]
+    fn shuffle_is_not_the_sorted_order() {
+        let mut p = Playlist::new(names(50), true, 9);
+        let order: Vec<PathBuf> = (0..50).map(|_| p.step(1).unwrap().to_path_buf()).collect();
+        assert_ne!(order, names(50));
+    }
+
+    #[test]
+    fn previous_goes_back_to_the_last_preset() {
+        let mut p = Playlist::new(names(20), true, 4);
+        let a = p.step(1).unwrap().to_path_buf();
+        let b = p.step(1).unwrap().to_path_buf();
+        assert_ne!(a, b);
+        assert_eq!(p.step(-1).unwrap(), a);
+        assert_eq!(p.step(1).unwrap(), b);
+    }
+
+    #[test]
+    fn a_new_pass_never_repeats_the_last_preset() {
+        for seed in 1..40 {
+            let mut p = Playlist::new(names(3), true, seed);
+            let mut last = p.step(1).unwrap().to_path_buf();
+            for _ in 0..12 {
+                let next = p.step(1).unwrap().to_path_buf();
+                assert_ne!(next, last, "seed {seed}");
+                last = next;
+            }
         }
     }
 
     #[test]
-    fn single_preset_is_always_picked() {
-        let mut p = Playlist::new(vec!["only".into()], 3);
-        assert_eq!(p.random().unwrap(), Path::new("only"));
-        assert_eq!(p.random().unwrap(), Path::new("only"));
+    fn toggling_shuffle_keeps_the_current_preset() {
+        let mut p = Playlist::new(names(30), true, 2);
+        p.step(1);
+        p.step(1);
+        let now = p.current().unwrap().to_path_buf();
+        p.set_shuffle(false);
+        assert_eq!(p.current().unwrap(), now);
+        p.set_shuffle(true);
+        assert_eq!(p.current().unwrap(), now);
+    }
+
+    #[test]
+    fn single_preset_always_plays() {
+        let mut p = Playlist::new(names(1), true, 3);
+        assert_eq!(p.step(1).unwrap(), names(1)[0]);
+        assert_eq!(p.step(1).unwrap(), names(1)[0]);
+        assert_eq!(p.step(-1).unwrap(), names(1)[0]);
     }
 }

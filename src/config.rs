@@ -42,8 +42,12 @@ pub struct Settings {
     pub borderless: bool,
     /// Folder searched (recursively) for MilkDrop `.milk` presets; empty = none.
     pub preset_dir: String,
-    /// Seconds between MilkDrop preset changes.
+    /// Change MilkDrop presets automatically every `preset_secs`.
+    pub preset_auto: bool,
+    /// Seconds between automatic MilkDrop preset changes.
     pub preset_secs: f32,
+    /// Play MilkDrop presets in random order (else folder order).
+    pub preset_shuffle: bool,
 }
 
 impl Default for Settings {
@@ -63,7 +67,9 @@ impl Default for Settings {
             always_on_top: false,
             borderless: false,
             preset_dir: String::new(),
+            preset_auto: true,
             preset_secs: 30.0,
+            preset_shuffle: true,
         }
     }
 }

@@ -40,6 +40,11 @@ pub trait Visualizer {
         None
     }
 
+    /// A message to show as a toast (e.g. "switched to preset X"), taken once.
+    fn take_message(&mut self) -> Option<String> {
+        None
+    }
+
     /// A status line for the settings panel, if there's something to say.
     fn status(&self) -> Option<String> {
         None

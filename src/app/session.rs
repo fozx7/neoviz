@@ -232,6 +232,9 @@ impl Session {
             self.switcher.random(&self.rotation(), &mut self.rng);
             self.on_switched();
         }
+        if let Some(message) = self.visualizers[self.switcher.current()].take_message() {
+            self.toast = Some(Toast::new(message));
+        }
         if let Some(toast) = &mut self.toast
             && !toast.tick(dt)
         {
