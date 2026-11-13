@@ -25,6 +25,8 @@ pub enum Action {
     ToggleSettings,
     NextPreset,
     PreviousPreset,
+    /// Spread across every monitor (double-tap F).
+    EnterSpan,
 }
 
 /// Returns the action bound to a key press, if any.
@@ -63,6 +65,11 @@ impl DoubleClickDetector {
         // A completed double-click resets, so a triple-click isn't two double-clicks.
         self.last_click = if is_double { None } else { Some(now) };
         is_double
+    }
+
+    /// Forgets any pending first click.
+    pub fn reset(&mut self) {
+        self.last_click = None;
     }
 }
 

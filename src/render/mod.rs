@@ -7,4 +7,5 @@ pub mod gpu;
 pub mod headless_gl;
 pub mod layer;
 pub mod lines;
+pub mod present;
 pub mod streaks;

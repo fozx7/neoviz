@@ -1,6 +1,7 @@
 //! The winit event loop handler: creates the window and routes events to the
 //! [`Session`].
 
+mod layout;
 mod session;
 
 use std::{path::PathBuf, sync::Arc, time::Instant};
@@ -37,6 +38,8 @@ pub struct App {
     config_path: Option<PathBuf>,
     session: Option<Session>,
     double_click: DoubleClickDetector,
+    /// Double-tapping F enters span mode.
+    f_taps: DoubleClickDetector,
     error: Option<anyhow::Error>,
 }
 
@@ -57,6 +60,7 @@ impl App {
             config_path,
             session: None,
             double_click: DoubleClickDetector::default(),
+            f_taps: DoubleClickDetector::default(),
             error: None,
         }
     }
@@ -93,8 +97,8 @@ impl App {
         }
 
         let window = Arc::new(event_loop.create_window(attrs).context("creating window")?);
-        let gpu = pollster::block_on(Gpu::new(window.clone()))?;
-        let visualizers = viz::create_all(gpu.device(), gpu.size());
+        let (gpu, main) = pollster::block_on(Gpu::new(window))?;
+        let visualizers = viz::create_all(gpu.device(), main.size());
         let names: Vec<&str> = visualizers.iter().map(|v| v.name()).collect();
         let start = match (&self.args.visualizer, &self.settings.visualizer) {
             // An explicit --visualizer must exist; a remembered one may have been renamed.
@@ -102,15 +106,19 @@ impl App {
             (None, Some(last)) => find_by_name(&names, last).unwrap_or(0),
             (None, None) => 0,
         };
-        Session::new(
-            window,
+        let mut session = Session::new(
             gpu,
+            main,
             visualizers,
             start,
             self.settings.clone(),
             self.saved.clone(),
             self.config_path.clone(),
-        )
+        )?;
+        if self.args.span {
+            session.enter_span(event_loop);
+        }
+        Ok(session)
     }
 }
 
@@ -125,22 +133,33 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let Some(session) = &mut self.session else {
             return;
         };
-        let ui_used = session.ui_event(&event);
+        if !session.owns(id) {
+            return;
+        }
+        // Only the main window has the overlay.
+        let is_main = session.is_main(id);
+        let ui_used = is_main && session.ui_event(&event);
 
         let action = match &event {
-            WindowEvent::CloseRequested => {
+            WindowEvent::CloseRequested if is_main => {
                 event_loop.exit();
                 return;
             }
-            WindowEvent::Resized(size) => {
-                session.resize(*size);
+            // Closing a span window ends span mode.
+            WindowEvent::CloseRequested => {
+                session.leave_span();
                 return;
             }
-            WindowEvent::RedrawRequested => {
+            WindowEvent::Resized(size) => {
+                session.on_resized(id, *size);
+                return;
+            }
+            // One redraw renders every window, so only the main one drives it.
+            WindowEvent::RedrawRequested if is_main => {
                 session.redraw();
                 return;
             }
@@ -153,6 +172,7 @@ impl ApplicationHandler for App {
                         !session.ui_wants_keyboard()
                             || matches!(a, Action::ToggleSettings | Action::Escape)
                     })
+                    .map(|a| fullscreen_or_span(a, session.is_spanning(), &mut self.f_taps))
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
@@ -165,7 +185,7 @@ impl ApplicationHandler for App {
             _ => None,
         };
         if let Some(action) = action
-            && session.apply(action) == Outcome::Quit
+            && session.apply(action, event_loop) == Outcome::Quit
         {
             event_loop.exit();
         }
@@ -175,6 +195,23 @@ impl ApplicationHandler for App {
         if let Some(session) = &mut self.session {
             session.save();
         }
+    }
+}
+
+/// F toggles full screen; a quick second F goes on to span every monitor.
+/// While spanning, F simply leaves span mode.
+fn fullscreen_or_span(action: Action, spanning: bool, taps: &mut DoubleClickDetector) -> Action {
+    if action != Action::ToggleFullscreen {
+        return action;
+    }
+    if spanning {
+        taps.reset();
+        return action;
+    }
+    if taps.click(Instant::now()) {
+        Action::EnterSpan
+    } else {
+        action
     }
 }
 
@@ -220,5 +257,41 @@ mod tests {
     fn unknown_visualizer_lists_the_options() {
         let err = find_by_name(&["Bars & Peaks", "Ring Scope"], "nope").unwrap_err();
         assert!(err.to_string().contains("Bars & Peaks, Ring Scope"));
+    }
+
+    #[test]
+    fn single_f_toggles_full_screen_and_a_quick_second_f_spans() {
+        let mut taps = DoubleClickDetector::default();
+        assert_eq!(
+            fullscreen_or_span(Action::ToggleFullscreen, false, &mut taps),
+            Action::ToggleFullscreen
+        );
+        assert_eq!(
+            fullscreen_or_span(Action::ToggleFullscreen, false, &mut taps),
+            Action::EnterSpan
+        );
+    }
+
+    #[test]
+    fn f_while_spanning_leaves_and_does_not_count_as_a_tap() {
+        let mut taps = DoubleClickDetector::default();
+        assert_eq!(
+            fullscreen_or_span(Action::ToggleFullscreen, true, &mut taps),
+            Action::ToggleFullscreen
+        );
+        // Right after leaving, a single F is just full screen again.
+        assert_eq!(
+            fullscreen_or_span(Action::ToggleFullscreen, false, &mut taps),
+            Action::ToggleFullscreen
+        );
+    }
+
+    #[test]
+    fn other_actions_pass_through() {
+        let mut taps = DoubleClickDetector::default();
+        assert_eq!(
+            fullscreen_or_span(Action::NextVisualizer, false, &mut taps),
+            Action::NextVisualizer
+        );
     }
 }

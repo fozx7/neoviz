@@ -17,6 +17,10 @@ pub struct Args {
     #[arg(long)]
     pub fullscreen: bool,
 
+    /// Start spread across every monitor (span mode; also double-tap F).
+    #[arg(long)]
+    pub span: bool,
+
     /// Monitor to open on (0-based index). Defaults to the primary monitor.
     #[arg(long, value_name = "N")]
     pub monitor: Option<usize>,

@@ -44,7 +44,7 @@ projectM is LGPL-3.0 and is linked statically into MilkDrop builds. That's fine 
 ## Usage
 
 ```sh
-neoviz [--fullscreen] [--monitor N] [--device NAME] [--visualizer NAME] [--presets DIR] [--list-devices]
+neoviz [--fullscreen] [--span] [--monitor N] [--device NAME] [--visualizer NAME] [--presets DIR] [--list-devices]
 ```
 
 By default neoViz captures whatever is playing on your default output device and follows it if you switch outputs. Use `--device` to capture something else, such as a microphone:
@@ -57,6 +57,7 @@ You can also pick the device in the settings overlay (`Tab`).
 | Key | Action |
 |---|---|
 | `F` / double-click | Toggle full screen |
+| `F` `F` (double-tap) | Span every monitor (one window per monitor, one picture across them); `F` or `Esc` to leave |
 | `←` / `→` | Previous / next visualizer |
 | `Esc` | Leave full screen, or quit when windowed |
 | `↑` / `↓` | Sensitivity up / down (3 dB steps) |
