@@ -12,6 +12,8 @@ clap = { version = "4.6", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
 pollster = "1"
+realfft = "3.5"
+rtrb = "0.4"
 wgpu = "30"
 winit = "0.30"
 
@@ -19,3 +21,10 @@ winit = "0.30"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = "2.30"
+libpulse-simple-binding = "2.29"
+
+[target."cfg(windows)".dependencies]
+cpal = "0.18"

@@ -81,16 +81,32 @@ impl Gpu {
         self.surface.configure(&self.device, &self.config);
     }
 
-    /// Clears the window to `color` and presents it.
-    pub fn render_clear(&mut self, color: wgpu::Color) -> FrameStatus {
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                // Draw this one, then reconfigure so the next frame matches the surface.
-                self.present_clear(frame, color);
-                self.surface.configure(&self.device, &self.config);
-                return FrameStatus::Presented;
-            }
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
+    /// Current surface size in physical pixels.
+    pub fn size(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    /// Acquires the next frame, lets `draw` record into it, then presents it.
+    pub fn render(
+        &mut self,
+        draw: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView),
+    ) -> FrameStatus {
+        let (frame, reconfigure) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            // Draw this one, then reconfigure so the next frame matches the surface.
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 log::warn!("surface outdated or lost; reconfiguring");
                 self.surface.configure(&self.device, &self.config);
@@ -101,35 +117,22 @@ impl Gpu {
                 return FrameStatus::Skipped;
             }
         };
-        self.present_clear(frame, color);
-        FrameStatus::Presented
-    }
 
-    fn present_clear(&self, frame: wgpu::SurfaceTexture, color: wgpu::Color) {
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("clear"),
+                label: Some("frame"),
             });
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-        }
+        draw(&mut encoder, &view);
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
+
+        if reconfigure {
+            self.surface.configure(&self.device, &self.config);
+        }
+        FrameStatus::Presented
     }
 }

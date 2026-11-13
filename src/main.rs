@@ -1,4 +1,5 @@
 mod app;
+mod audio;
 mod input;
 mod render;
 
@@ -16,6 +17,12 @@ pub struct Args {
     /// Monitor to open on (0-based index). Defaults to the primary monitor.
     #[arg(long, value_name = "N")]
     pub monitor: Option<usize>,
+
+    /// Audio device to capture instead of the default output's loopback.
+    /// Linux: a PulseAudio source name (see `pactl list short sources`).
+    /// Windows: the device name as shown in Sound settings.
+    #[arg(long, value_name = "NAME")]
+    pub device: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
