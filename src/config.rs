@@ -18,7 +18,9 @@ pub const AUTO_SWITCH_RANGE: (f32, f32) = (5.0, 300.0);
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Capture device; `None` = loopback of the default output.
+    /// Capture device; `None` = loopback of the default output. Session-only:
+    /// never saved, so every launch starts on whatever is playing now.
+    #[serde(skip)]
     pub device: Option<String>,
     /// Sensitivity in dB, ±[`GAIN_LIMIT_DB`].
     pub sensitivity_db: f32,
@@ -70,9 +72,6 @@ impl Settings {
             .clamp(SMOOTHING_RANGE.0, SMOOTHING_RANGE.1);
         self.auto_switch_secs = finite_or(self.auto_switch_secs, d.auto_switch_secs)
             .clamp(AUTO_SWITCH_RANGE.0, AUTO_SWITCH_RANGE.1);
-        if self.device.as_deref().is_some_and(|d| d.trim().is_empty()) {
-            self.device = None;
-        }
         self
     }
 
@@ -154,7 +153,6 @@ mod tests {
     #[test]
     fn round_trips_through_toml() {
         let mut s = Settings {
-            device: Some("alsa_output.monitor".into()),
             sensitivity_db: 6.0,
             random_mode: true,
             ..Default::default()
@@ -193,9 +191,19 @@ mod tests {
     }
 
     #[test]
-    fn blank_device_means_default() {
-        let s = Settings::from_toml("device = \"  \"").unwrap();
+    fn device_is_never_saved() {
+        let s = Settings {
+            device: Some("alsa_output.monitor".into()),
+            ..Default::default()
+        };
+        assert!(!s.to_toml().unwrap().contains("device"));
+    }
+
+    #[test]
+    fn saved_device_is_ignored_so_startup_uses_the_current_output() {
+        let s = Settings::from_toml("device = \"alsa_output.monitor\"\nbloom = false").unwrap();
         assert_eq!(s.device, None);
+        assert!(!s.bloom, "other settings still load");
     }
 
     #[test]
