@@ -101,7 +101,7 @@ impl Gpu {
     /// Acquires the next frame, lets `draw` record into it, then presents it.
     pub fn render(
         &mut self,
-        draw: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView),
+        draw: impl FnOnce(&wgpu::Queue, &mut wgpu::CommandEncoder, &wgpu::TextureView),
     ) -> FrameStatus {
         let (frame, reconfigure) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
@@ -126,7 +126,7 @@ impl Gpu {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        draw(&mut encoder, &view);
+        draw(&self.queue, &mut encoder, &view);
         self.queue.submit([encoder.finish()]);
         self.queue.present(frame);
 

@@ -14,6 +14,9 @@ pub enum Action {
     Escape,
     SensitivityUp,
     SensitivityDown,
+    NextVisualizer,
+    PreviousVisualizer,
+    ToggleDebugView,
 }
 
 /// Returns the action bound to a key press, if any.
@@ -22,6 +25,9 @@ pub fn action_for_key(key: &Key) -> Option<Action> {
         Key::Named(NamedKey::Escape) => Some(Action::Escape),
         Key::Named(NamedKey::ArrowUp) => Some(Action::SensitivityUp),
         Key::Named(NamedKey::ArrowDown) => Some(Action::SensitivityDown),
+        Key::Named(NamedKey::ArrowRight) => Some(Action::NextVisualizer),
+        Key::Named(NamedKey::ArrowLeft) => Some(Action::PreviousVisualizer),
+        Key::Character(c) if c.eq_ignore_ascii_case("d") => Some(Action::ToggleDebugView),
         Key::Character(c) if c.eq_ignore_ascii_case("f") => Some(Action::ToggleFullscreen),
         _ => None,
     }
@@ -78,6 +84,22 @@ mod tests {
         assert_eq!(
             action_for_key(&Key::Named(NamedKey::ArrowDown)),
             Some(Action::SensitivityDown)
+        );
+    }
+
+    #[test]
+    fn left_right_switch_visualizers_and_d_toggles_debug() {
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::ArrowRight)),
+            Some(Action::NextVisualizer)
+        );
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::ArrowLeft)),
+            Some(Action::PreviousVisualizer)
+        );
+        assert_eq!(
+            action_for_key(&Key::Character("D".into())),
+            Some(Action::ToggleDebugView)
         );
     }
 

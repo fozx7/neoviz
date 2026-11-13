@@ -2,7 +2,7 @@
 
 use std::{sync::Arc, time::Instant};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition},
@@ -19,7 +19,12 @@ use crate::{
         analysis::{Analyzer, GAIN_STEP_DB},
     },
     input::{Action, DoubleClickDetector, action_for_key},
-    render::{debug_view::DebugView, gpu::Gpu},
+    render::{
+        compositor::{Compositor, INCOMING, OUTGOING},
+        debug_view::DebugView,
+        gpu::Gpu,
+    },
+    viz::{self, Switcher, Visualizer},
 };
 
 const WINDOW_TITLE: &str = "neoViz";
@@ -41,7 +46,11 @@ struct Running {
     gpu: Gpu,
     capture: Capture,
     analyzer: Analyzer,
+    visualizers: Vec<Box<dyn Visualizer>>,
+    switcher: Switcher,
+    compositor: Compositor,
     debug_view: DebugView,
+    show_debug: bool,
     last_frame: Instant,
 }
 
@@ -55,17 +64,54 @@ impl Running {
         let sample_rate = self.capture.sample_rate();
         self.analyzer.ingest(&mut self.capture.consumer);
         self.analyzer.analyze(sample_rate, dt);
-        self.debug_view.update(
-            self.gpu.queue(),
-            &self.analyzer.frame(),
-            sample_rate,
-            self.gpu.size(),
-            dt,
-        );
-        let debug_view = &self.debug_view;
-        self.gpu
-            .render(|encoder, target| debug_view.draw(encoder, target));
+        let audio = self.analyzer.frame();
+        let size = self.gpu.size();
+
+        if self.show_debug {
+            self.debug_view
+                .update(self.gpu.queue(), &audio, sample_rate, size, dt);
+            let debug_view = &self.debug_view;
+            self.gpu
+                .render(|_, encoder, target| debug_view.draw(encoder, target));
+        } else {
+            self.switcher.advance(dt);
+            let current = self.switcher.current();
+            let outgoing = self.switcher.outgoing();
+            for index in std::iter::once(current).chain(outgoing) {
+                self.visualizers[index].update(&audio, dt);
+            }
+
+            let (visualizers, compositor, mix) =
+                (&mut self.visualizers, &self.compositor, self.switcher.mix());
+            self.gpu.render(|queue, encoder, target| {
+                if let Some(index) = outgoing {
+                    visualizers[index].render(queue, encoder, compositor.slot(OUTGOING), size);
+                }
+                visualizers[current].render(queue, encoder, compositor.slot(INCOMING), size);
+                compositor.draw(queue, encoder, target, mix);
+            });
+        }
         self.window.request_redraw();
+    }
+
+    fn resize(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+        self.gpu.resize(size);
+        let size = self.gpu.size();
+        self.compositor.resize(self.gpu.device(), size);
+        for v in &mut self.visualizers {
+            v.resize(self.gpu.device(), size);
+        }
+    }
+
+    fn update_title(&self) {
+        let name = self.visualizers[self.switcher.current()].name();
+        let mut title = format!("{WINDOW_TITLE} · {name}");
+        let gain = self.analyzer.settings.gain_db;
+        // Until the on-screen overlay exists, the title bar shows this.
+        if gain != 0.0 {
+            title.push_str(&format!(" · sensitivity {gain:+} dB"));
+        }
+        self.window.set_title(&title);
     }
 }
 
@@ -108,17 +154,28 @@ impl App {
 
         let window = Arc::new(event_loop.create_window(attrs).context("creating window")?);
         let gpu = pollster::block_on(Gpu::new(window.clone()))?;
-        let debug_view = DebugView::new(gpu.device(), gpu.surface_format());
-        let capture = Capture::start(self.args.device.clone())?;
-        window.request_redraw();
-        Ok(Running {
+        let size = gpu.size();
+        let visualizers = viz::create_all(gpu.device(), size);
+        let names: Vec<&str> = visualizers.iter().map(|v| v.name()).collect();
+        let start = match &self.args.visualizer {
+            Some(wanted) => find_by_name(&names, wanted)?,
+            None => 0,
+        };
+        let running = Running {
+            switcher: Switcher::new(visualizers.len(), start),
+            compositor: Compositor::new(gpu.device(), gpu.surface_format(), size),
+            debug_view: DebugView::new(gpu.device(), gpu.surface_format()),
+            capture: Capture::start(self.args.device.clone())?,
+            analyzer: Analyzer::default(),
+            visualizers,
+            show_debug: false,
+            last_frame: Instant::now(),
             window,
             gpu,
-            capture,
-            analyzer: Analyzer::default(),
-            debug_view,
-            last_frame: Instant::now(),
-        })
+        };
+        running.update_title();
+        running.window.request_redraw();
+        Ok(running)
     }
 
     fn apply(&mut self, action: Action, event_loop: &ActiveEventLoop) {
@@ -135,9 +192,18 @@ impl App {
                 };
                 let gain = running.analyzer.adjust_gain(step);
                 log::info!("sensitivity {gain:+} dB");
-                // Until the on-screen overlay exists, the title bar shows it.
-                window.set_title(&format!("{WINDOW_TITLE} · sensitivity {gain:+} dB"));
+                running.update_title();
             }
+            Action::NextVisualizer | Action::PreviousVisualizer => {
+                if action == Action::NextVisualizer {
+                    running.switcher.next();
+                } else {
+                    running.switcher.previous();
+                }
+                running.show_debug = false;
+                running.update_title();
+            }
+            Action::ToggleDebugView => running.show_debug = !running.show_debug,
             Action::ToggleFullscreen => {
                 let next = match window.fullscreen() {
                     Some(_) => None,
@@ -167,7 +233,7 @@ impl ApplicationHandler for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 if let Some(r) = &mut self.running {
-                    r.gpu.resize(size);
+                    r.resize(size);
                 }
             }
             WindowEvent::KeyboardInput { event, .. }
@@ -211,4 +277,32 @@ fn pick_monitor(
             monitors.len()
         )
     })
+}
+
+/// Index of the visualizer called `wanted` (case-insensitive).
+fn find_by_name(names: &[&str], wanted: &str) -> Result<usize> {
+    if let Some(i) = names.iter().position(|n| n.eq_ignore_ascii_case(wanted)) {
+        return Ok(i);
+    }
+    bail!(
+        "no visualizer named {wanted:?}; available: {}",
+        names.join(", ")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_visualizers_case_insensitively() {
+        let names = ["Bars & Peaks", "Ring Scope"];
+        assert_eq!(find_by_name(&names, "ring scope").unwrap(), 1);
+    }
+
+    #[test]
+    fn unknown_visualizer_lists_the_options() {
+        let err = find_by_name(&["Bars & Peaks", "Ring Scope"], "nope").unwrap_err();
+        assert!(err.to_string().contains("Bars & Peaks, Ring Scope"));
+    }
 }

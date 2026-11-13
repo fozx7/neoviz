@@ -2,6 +2,7 @@ mod app;
 mod audio;
 mod input;
 mod render;
+mod viz;
 
 use clap::Parser;
 use winit::event_loop::{ControlFlow, EventLoop};
@@ -23,6 +24,10 @@ pub struct Args {
     /// Windows: the device name as shown in Sound settings.
     #[arg(long, value_name = "NAME")]
     pub device: Option<String>,
+
+    /// Visualizer to start with (case-insensitive name, e.g. "ring scope").
+    #[arg(long, value_name = "NAME")]
+    pub visualizer: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {

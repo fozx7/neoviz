@@ -2,7 +2,7 @@
 
 A retro-style music visualizer for Windows and Linux. It listens to whatever your computer is playing (Spotify, a browser, a game) and draws full-screen visuals in the spirit of the mid-2000s media player visualizers. It doesn't play music itself.
 
-> **Status:** early development. System audio capture works on Linux and Windows and currently drives a debug view: waveform, raw spectrum, then smoothed bands with peak caps, level meters and a beat flash. Visualizers come next. See [SCOPE.md](SCOPE.md) for the full plan.
+> **Status:** early development. Audio capture and analysis work; the first visualizers (spectrum bars and oscilloscopes, three variants each) are in, with crossfades between them. See [SCOPE.md](SCOPE.md) for the full plan.
 
 ## Build
 
@@ -26,7 +26,7 @@ Nothing extra beyond the Rust toolchain (MSVC).
 ## Usage
 
 ```sh
-neoviz [--fullscreen] [--monitor N] [--device NAME]
+neoviz [--fullscreen] [--monitor N] [--device NAME] [--visualizer NAME]
 ```
 
 By default neoViz captures whatever is playing on your default output device and follows it if you switch outputs. Use `--device` to capture something else, such as a microphone:
@@ -37,7 +37,9 @@ By default neoViz captures whatever is playing on your default output device and
 | Key | Action |
 |---|---|
 | `F` / double-click | Toggle full screen |
+| `←` / `→` | Previous / next visualizer |
 | `Esc` | Leave full screen, or quit when windowed |
 | `↑` / `↓` | Sensitivity up / down (3 dB steps, shown in the title bar) |
+| `D` | Toggle the analysis debug view |
 
 Set `RUST_LOG=debug` for verbose logging.
