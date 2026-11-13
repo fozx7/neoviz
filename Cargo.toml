@@ -1,0 +1,21 @@
+[package]
+name = "neoviz"
+version = "0.1.0"
+edition = "2024"
+description = "Retro-style system-audio visualizer for Windows and Linux"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.6", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+pollster = "1"
+wgpu = "30"
+winit = "0.30"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

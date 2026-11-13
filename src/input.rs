@@ -1,0 +1,98 @@
+//! Maps raw input to app actions. Kept free of window/GPU state so it is unit-testable.
+
+use std::time::{Duration, Instant};
+
+use winit::keyboard::{Key, NamedKey};
+
+/// Maximum gap between two clicks for them to count as a double-click.
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(400);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    ToggleFullscreen,
+    /// Leave full screen if in it, otherwise quit.
+    Escape,
+}
+
+/// Returns the action bound to a key press, if any.
+pub fn action_for_key(key: &Key) -> Option<Action> {
+    match key {
+        Key::Named(NamedKey::Escape) => Some(Action::Escape),
+        Key::Character(c) if c.eq_ignore_ascii_case("f") => Some(Action::ToggleFullscreen),
+        _ => None,
+    }
+}
+
+/// Detects double-clicks from a stream of left-button presses.
+#[derive(Debug, Default)]
+pub struct DoubleClickDetector {
+    last_click: Option<Instant>,
+}
+
+impl DoubleClickDetector {
+    /// Records a click at `now` and returns true if it completes a double-click.
+    pub fn click(&mut self, now: Instant) -> bool {
+        let is_double = self
+            .last_click
+            .is_some_and(|prev| now.saturating_duration_since(prev) <= DOUBLE_CLICK_WINDOW);
+        // A completed double-click resets, so a triple-click isn't two double-clicks.
+        self.last_click = if is_double { None } else { Some(now) };
+        is_double
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn f_toggles_fullscreen_in_either_case() {
+        assert_eq!(
+            action_for_key(&Key::Character("f".into())),
+            Some(Action::ToggleFullscreen)
+        );
+        assert_eq!(
+            action_for_key(&Key::Character("F".into())),
+            Some(Action::ToggleFullscreen)
+        );
+    }
+
+    #[test]
+    fn escape_maps_to_escape() {
+        assert_eq!(
+            action_for_key(&Key::Named(NamedKey::Escape)),
+            Some(Action::Escape)
+        );
+    }
+
+    #[test]
+    fn unbound_keys_do_nothing() {
+        assert_eq!(action_for_key(&Key::Character("q".into())), None);
+        assert_eq!(action_for_key(&Key::Named(NamedKey::Enter)), None);
+    }
+
+    #[test]
+    fn two_quick_clicks_are_a_double_click() {
+        let mut d = DoubleClickDetector::default();
+        let t0 = Instant::now();
+        assert!(!d.click(t0));
+        assert!(d.click(t0 + Duration::from_millis(200)));
+    }
+
+    #[test]
+    fn slow_clicks_are_not_a_double_click() {
+        let mut d = DoubleClickDetector::default();
+        let t0 = Instant::now();
+        assert!(!d.click(t0));
+        assert!(!d.click(t0 + Duration::from_millis(600)));
+    }
+
+    #[test]
+    fn triple_click_yields_one_double_click() {
+        let mut d = DoubleClickDetector::default();
+        let t0 = Instant::now();
+        assert!(!d.click(t0));
+        assert!(d.click(t0 + Duration::from_millis(100)));
+        assert!(!d.click(t0 + Duration::from_millis(200)));
+    }
+}
