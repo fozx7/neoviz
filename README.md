@@ -2,7 +2,7 @@
 
 A retro-style music visualizer for Windows and Linux. It listens to whatever your computer is playing (Spotify, a browser, a game) and draws full-screen visuals in the spirit of the mid-2000s media player visualizers. It doesn't play music itself.
 
-> **Status:** usable. Audio capture, all seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay, saved settings and optional MilkDrop presets are in. Packaging is next. See [SCOPE.md](SCOPE.md) for the full plan.
+> **Status:** feature-complete for 1.0. Audio capture, seven built-in visualizers (plus variants), crossfades, post-FX, a settings overlay, saved settings, span mode and MilkDrop presets work on Linux and Windows, with packages for x86-64 and ARM64. See [SCOPE.md](SCOPE.md) for the plan and what's left.
 
 ## Install
 
