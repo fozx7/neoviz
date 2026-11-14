@@ -51,6 +51,8 @@ pub struct Settings {
     pub bloom: bool,
     pub scanlines: bool,
     pub show_fps: bool,
+    /// The FPS counter shows lows, frame times and a graph, not just the rate.
+    pub fps_detail: bool,
     pub always_on_top: bool,
     pub borderless: bool,
     /// Folder searched (recursively) for MilkDrop `.milk` presets; empty = none.
@@ -87,6 +89,7 @@ impl Default for Settings {
             bloom: true,
             scanlines: false,
             show_fps: false,
+            fps_detail: false,
             always_on_top: false,
             borderless: false,
             preset_dir: String::new(),

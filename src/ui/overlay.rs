@@ -11,7 +11,10 @@ use crate::{
     },
 };
 
-use super::Toast;
+use super::{
+    Toast,
+    fps_hud::{self, FpsHud},
+};
 
 /// What the panel needs to show besides the settings themselves.
 pub struct PanelInfo<'a> {
@@ -246,6 +249,14 @@ fn display_section(ui: &mut egui::Ui, settings: &mut Settings, keeping_awake: bo
         ui.checkbox(&mut settings.bloom, "Bloom");
         ui.checkbox(&mut settings.scanlines, "CRT scanlines");
         ui.checkbox(&mut settings.show_fps, "FPS counter");
+        ui.add_enabled(
+            settings.show_fps,
+            egui::Checkbox::new(&mut settings.fps_detail, "Detailed"),
+        )
+        .on_hover_text(
+            "Adds 1% / 5% lows, frame times, how long each frame spends working vs \
+             waiting for the display, late (dropped) frames, and a frame-time graph.",
+        );
     });
     ui.horizontal(|ui| {
         ui.checkbox(&mut settings.always_on_top, "Always on top");
@@ -294,8 +305,7 @@ fn footer(ui: &mut egui::Ui, info: &PanelInfo) {
 /// Text drawn straight onto the screen, outside any window.
 pub struct Hud<'a> {
     pub toast: Option<&'a Toast>,
-    /// (frames per second, worst frame time in ms) over the last second.
-    pub fps: Option<(f32, f32)>,
+    pub fps: Option<FpsHud>,
     pub capture_error: Option<&'a str>,
 }
 
@@ -315,18 +325,8 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
             toast.alpha(),
         );
     }
-    if let Some((fps, worst_ms)) = hud.fps {
-        let pos = Pos2::new(screen.right() - 12.0, screen.top() + 8.0);
-        let text = format!("{fps:.0} fps · worst {worst_ms:.0} ms");
-        shadowed_text(
-            &painter,
-            pos,
-            Align2::RIGHT_TOP,
-            &text,
-            16.0,
-            Color32::LIGHT_GREEN,
-            1.0,
-        );
+    if let Some(fps) = &hud.fps {
+        fps_hud::draw(&painter, screen, fps);
     }
     if let Some(err) = hud.capture_error {
         let pos = Pos2::new(screen.center().x, screen.top() + 16.0);
@@ -343,7 +343,7 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
     }
 }
 
-fn shadowed_text(
+pub(super) fn shadowed_text(
     painter: &egui::Painter,
     pos: Pos2,
     anchor: Align2,

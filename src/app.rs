@@ -3,7 +3,7 @@
 
 mod awake;
 mod fade;
-mod frame_stats;
+pub mod frame_stats;
 mod layout;
 mod session;
 

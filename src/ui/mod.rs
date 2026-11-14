@@ -1,6 +1,7 @@
 //! On-screen UI via egui: the settings overlay and the heads-up text
 //! (visualizer name, FPS, capture errors), drawn over the visualizers.
 
+pub mod fps_hud;
 pub mod overlay;
 
 use winit::window::Window;

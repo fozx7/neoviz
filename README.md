@@ -92,6 +92,8 @@ Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy P
 
 **Keep screen on** (overlay → Display): by default neoViz stops the screen blanking or locking while music plays, like a video player, and lets it sleep after a minute of silence. Set it to *Always* or *Off* if you prefer.
 
+**FPS counter** (overlay → Display): shows the frame rate. Tick *Detailed* for performance figures over the last 10 s: 1% and 5% lows (the frame rate across the slowest 1% / 5% of frames), frame times (average, 99th percentile, worst), how much of each frame neoViz spends working versus waiting for the display, how many frames were late (missed a refresh, so the previous picture showed twice), and a graph of recent frame times with late frames in orange. If frames are late while *work* is small, something outside neoViz is holding it up.
+
 **Fade out when the music stops** (overlay → Display): after a couple of seconds of silence the picture fades to black, and it fades back in as soon as sound returns. Untick it to keep the visuals running in silence.
 
 Too fast or too flashy? In the overlay's **Motion** section, *Speed* slows the visualizers' own movement and colour cycling (0.25×–2×), and *Beat flashes* tones down the pulse on each beat. MilkDrop presets keep their own pace.

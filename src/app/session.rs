@@ -1,7 +1,11 @@
 //! Everything that exists while the window is open: GPU, audio, visualizers,
 //! UI and settings, plus the per-frame loop.
 
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use winit::{
@@ -14,7 +18,7 @@ use winit::{
 use super::{
     awake::Awake,
     fade::SilenceFade,
-    frame_stats::FrameStats,
+    frame_stats::{FrameStats, FrameTiming},
     layout::{self, Rect},
 };
 
@@ -34,6 +38,7 @@ use crate::{
     },
     ui::{
         Toast, Ui,
+        fps_hud::{FpsDetail, FpsHud},
         overlay::{self, Hud, PanelInfo},
     },
     viz::{AutoSwitch, Lineup, Rng, Switcher, Visualizer},
@@ -352,7 +357,6 @@ impl Session {
         // Clamp so a stall (e.g. dragging the window) doesn't cause a huge jump.
         let dt = (now - self.last_frame).as_secs_f32().min(MAX_FRAME_DT);
         self.last_frame = now;
-        self.frame_stats.record(dt);
 
         self.analyzer.settings = BandSettings {
             gain_db: self.settings.sensitivity_db,
@@ -409,13 +413,20 @@ impl Session {
                 self.visualizers[index].update(&calmed, motion_dt);
             }
         }
-        self.draw(size);
+        let wait = self.draw(size);
         self.save_if_changed(dt);
+        let total = now.elapsed().as_secs_f32();
+        self.frame_stats.record(FrameTiming {
+            dt,
+            work: (total - wait).max(0.0),
+            wait,
+        });
         self.window().request_redraw();
     }
 
     /// Renders the frame into the canvas, then copies each display its slice.
-    fn draw(&mut self, size: (u32, u32)) {
+    /// Returns the seconds spent blocked on the displays (acquire + present).
+    fn draw(&mut self, size: (u32, u32)) -> f32 {
         let current = self.switcher.current();
         let mix = self.switcher.mix();
         let post = PostFx {
@@ -450,9 +461,12 @@ impl Session {
                 .draw(queue, &mut encoder, canvas, mix, post, brightness);
         }
 
+        let mut wait = Duration::ZERO;
         let mut frames = Vec::with_capacity(self.displays.len());
         for (i, display) in self.displays.iter_mut().enumerate() {
+            let started = Instant::now();
             let frame = display.acquire(&self.gpu);
+            wait += started.elapsed();
             if let Some(frame) = &frame {
                 let slice = self.slices.get(i).copied().unwrap_or(WHOLE);
                 self.canvas
@@ -466,11 +480,14 @@ impl Session {
             frames.push(frame);
         }
         queue.submit([encoder.finish()]);
+        let started = Instant::now();
         for (display, frame) in self.displays.iter_mut().zip(frames) {
             if let Some(frame) = frame {
                 display.present(&self.gpu, frame);
             }
         }
+        wait += started.elapsed();
+        wait.as_secs_f32()
     }
 
     /// Lays out the overlay and HUD, then acts on anything the user changed.
@@ -500,7 +517,13 @@ impl Session {
         };
         let hud = Hud {
             toast: self.toast.as_ref(),
-            fps: self.settings.show_fps.then(|| self.frame_stats.report()),
+            fps: self.settings.show_fps.then(|| FpsHud {
+                fps: self.frame_stats.fps(),
+                detail: self.settings.fps_detail.then(|| FpsDetail {
+                    figures: *self.frame_stats.detail(),
+                    recent_ms: self.frame_stats.recent_ms(),
+                }),
+            }),
             capture_error: capture_error.as_deref(),
         };
         let mut requests = Default::default();
