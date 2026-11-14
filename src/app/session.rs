@@ -35,7 +35,7 @@ use crate::{
         Toast, Ui,
         overlay::{self, Hud, PanelInfo},
     },
-    viz::{AutoSwitch, Rng, Switcher, Visualizer},
+    viz::{AutoSwitch, Lineup, Rng, Switcher, Visualizer},
 };
 
 const WINDOW_TITLE: &str = "neoViz";
@@ -79,6 +79,8 @@ pub struct Session {
     /// What's on disk, to know when to save.
     saved: Settings,
     config_path: Option<PathBuf>,
+    /// (visualizer, reason) for visualizers that couldn't start, shown in the overlay.
+    startup_failures: Vec<(String, String)>,
     since_save: f32,
     devices: Vec<DeviceInfo>,
     device_list_error: Option<String>,
@@ -96,14 +98,17 @@ impl Session {
     pub fn new(
         gpu: Gpu,
         main: Display,
-        visualizers: Vec<Box<dyn Visualizer>>,
+        lineup: Lineup,
         start: usize,
         settings: Settings,
         saved: Settings,
         config_path: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let size = main.size();
-        let mut visualizers = visualizers;
+        let Lineup {
+            mut visualizers,
+            failures: startup_failures,
+        } = lineup;
         for v in &mut visualizers {
             v.configure(&settings, true);
         }
@@ -121,6 +126,7 @@ impl Session {
             rng: Rng::new(seed_from_clock()),
             visualizers,
             names,
+            startup_failures,
             settings,
             saved,
             config_path,
@@ -484,9 +490,14 @@ impl Session {
             locked: self.locked,
             config_path: self.config_path.as_deref(),
             statuses: self
-                .visualizers
+                .startup_failures
                 .iter()
-                .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s)))
+                .cloned()
+                .chain(
+                    self.visualizers
+                        .iter()
+                        .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s))),
+                )
                 .collect(),
             keeping_awake: self.awake.is_holding(),
         };

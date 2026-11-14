@@ -5,6 +5,7 @@ mod app;
 mod audio;
 mod config;
 mod input;
+mod logging;
 mod render;
 mod ui;
 mod viz;
@@ -48,7 +49,8 @@ pub struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let config_path = config::default_path();
+    let log_path = logging::init(config_path.as_deref().and_then(std::path::Path::parent));
     let args = Args::parse();
     if args.list_devices {
         return print_devices();
@@ -58,10 +60,12 @@ fn main() -> anyhow::Result<()> {
     // Rendering is paced by vsync (FIFO present mode), so poll continuously.
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let config_path = config::default_path();
     let settings = config_path.as_deref().map(config::load).unwrap_or_default();
     if let Some(path) = &config_path {
         log::info!("settings: {}", path.display());
+    }
+    if let Some(path) = &log_path {
+        log::info!("log: {}", path.display());
     }
 
     let mut app = app::App::new(args, settings, config_path);

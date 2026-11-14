@@ -34,8 +34,13 @@ impl HeadlessGl {
         // returns GL entry points (or null) for it.
         let gl = unsafe { glow::Context::from_loader_function(|name| backend.proc_address(name)) };
         // SAFETY: plain state queries on the current context.
-        let renderer = unsafe { gl.get_parameter_string(glow::RENDERER) };
-        log::info!("MilkDrop OpenGL: {renderer}");
+        let (renderer, version) = unsafe {
+            (
+                gl.get_parameter_string(glow::RENDERER),
+                gl.get_parameter_string(glow::VERSION),
+            )
+        };
+        log::info!("MilkDrop OpenGL: {renderer} ({version})");
         Ok(Self {
             gl,
             size,
