@@ -68,7 +68,7 @@ jobs:
         run: |
           name="neoviz-${GITHUB_REF_NAME//\//-}-${{ matrix.target }}"
           mkdir "$name"
-          cp target/dist/neoviz README.md LICENSE packaging/linux/* "$name/"
+          cp target/dist/neoviz README.md LICENSE packaging/THIRD-PARTY-NOTICES.md packaging/LICENSE-LGPL-2.1.txt packaging/linux/* "$name/"
           tar czf "$name.tar.gz" "$name"
           echo "PACKAGE=$name.tar.gz" >> "$GITHUB_ENV"
 
@@ -78,7 +78,7 @@ jobs:
         run: |
           $name = "neoviz-$($env:GITHUB_REF_NAME -replace '/', '-')-${{ matrix.target }}"
           New-Item -ItemType Directory $name | Out-Null
-          Copy-Item target/dist/neoviz.exe, README.md, LICENSE $name
+          Copy-Item target/dist/neoviz.exe, README.md, LICENSE, packaging/THIRD-PARTY-NOTICES.md, packaging/LICENSE-LGPL-2.1.txt $name
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           "PACKAGE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 

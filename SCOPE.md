@@ -117,7 +117,7 @@ MilkDrop is required on **both Windows and Linux** for v1.
 - **Sensitivity barely affects MilkDrop:** projectM rates loudness against its own running average, as MilkDrop always did. The overlay says so.
 - **No preset pack is bundled.** The user points neoViz at a folder (`--presets` or the overlay; `~` is expanded). The README recommends the projectM "cream of the crop" pack.
 - Shuffle (on by default), auto-change every 30 s (adjustable), `[` / `]` to step, and each new preset's name pops up.
-- projectM is LGPL-3.0 and linked statically. That's fine for personal use, but a distributed build must let recipients relink it. `--no-default-features` builds without it.
+- projectM is LGPL-2.1 and linked statically. The packages ship third-party notices and the LGPL text, and the public source (with `vendor/`) lets anyone relink. `--no-default-features` builds without it.
 
 ## 8. App behaviour and controls
 
@@ -263,6 +263,6 @@ Done since v0.9.0: MilkDrop on Windows (patched `projectm-sys`, WGL pbuffer, GLE
 3. **Merge `milkdrop-windows` into `main`.** Opening the PR also runs CI's Windows lint and tests, which haven't run on this branch (only release builds have).
 4. **Release 1.0.0:** bump `version` in `Cargo.toml`, tag `v1.0.0`, and let the release workflow publish it.
 
-**Decide before making the repo or its releases public:** the packages link projectM (LGPL) statically. While the repo is private and the builds are for personal use, that's fine. If they're published, the LGPL's relinking requirement is met by keeping neoViz's full source (including `vendor/`) available alongside, and the packages should then include projectM's licence text.
+**Licensing (settled):** neoViz is MIT. The packages link projectM (LGPL-2.1) and, on Windows, GLEW statically; they ship `THIRD-PARTY-NOTICES.md` and the LGPL text, and the full source (with `vendor/`) satisfies the LGPL's relinking requirement once the repo is public.
 
-**Not tested on hardware:** the ARM64 packages (Linux and Windows) build in CI but haven't been run.
+**Not tested on hardware:** the Linux ARM64 package builds in CI but hasn't been run (no device). Windows ARM64 will be tested on a Windows ARM device.

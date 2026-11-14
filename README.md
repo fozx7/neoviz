@@ -58,7 +58,9 @@ git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-
 
 The folder can also be set in the settings overlay. MilkDrop then appears as one more visualizer. By default it shuffles through the presets, changing every 30 s; in the overlay you can turn shuffle or the timer off, or change the interval. `[` / `]` step back and forward through presets, and each new preset's name pops up briefly. The next preset is loaded in the background while the current one plays, so changes crossfade smoothly (2 s on the timer, half a second for `[` / `]`) instead of pausing while a preset compiles. Presets projectM can't load are skipped.
 
-projectM is LGPL-3.0 and is linked statically into MilkDrop builds. That's fine for personal use; if you distribute such a build, the LGPL requires that recipients can relink it against their own projectM. To build without it, use `--no-default-features`.
+projectM is LGPL-2.1 and is linked statically. The LGPL lets you swap in your own projectM: neoViz's full source (including the patched build crates in `vendor/`) is available, and the release packages include the licence text and [third-party notices](packaging/THIRD-PARTY-NOTICES.md). To build without projectM, use `--no-default-features`.
+
+neoViz itself is MIT-licensed: anyone can take the source and make it their own.
 
 ## Usage
 
