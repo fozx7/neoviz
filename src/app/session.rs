@@ -490,6 +490,19 @@ impl Session {
         wait.as_secs_f32()
     }
 
+    /// What's on screen, e.g. "Bars & Peaks" or "MilkDrop: preset name".
+    fn showing(&self) -> String {
+        if self.show_debug {
+            return "Analysis debug view".to_owned();
+        }
+        let current = self.switcher.current();
+        let name = &self.names[current];
+        match self.visualizers[current].showing() {
+            Some(item) => format!("{name}: {item}"),
+            None => name.clone(),
+        }
+    }
+
     /// Lays out the overlay and HUD, then acts on anything the user changed.
     fn build_ui(&mut self) {
         let before = self.settings.clone();
@@ -520,6 +533,7 @@ impl Session {
             fps: self.settings.show_fps.then(|| FpsHud {
                 fps: self.frame_stats.fps(),
                 detail: self.settings.fps_detail.then(|| FpsDetail {
+                    showing: self.showing(),
                     figures: *self.frame_stats.detail(),
                     recent_ms: self.frame_stats.recent_ms(),
                 }),

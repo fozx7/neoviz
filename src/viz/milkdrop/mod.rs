@@ -305,6 +305,10 @@ impl Visualizer for MilkDrop {
         self.status.clone()
     }
 
+    fn showing(&self) -> Option<String> {
+        self.decks[self.live].preset().map(display_name)
+    }
+
     fn take_message(&mut self) -> Option<String> {
         self.message.take()
     }

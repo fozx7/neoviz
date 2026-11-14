@@ -49,6 +49,12 @@ pub trait Visualizer {
         None
     }
 
+    /// What it's showing within itself, if it has more than one thing
+    /// (e.g. the MilkDrop preset on screen).
+    fn showing(&self) -> Option<String> {
+        None
+    }
+
     /// A status line for the settings panel, if there's something to say.
     fn status(&self) -> Option<String> {
         None
