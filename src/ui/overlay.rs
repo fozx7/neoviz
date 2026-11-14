@@ -39,6 +39,10 @@ pub struct PanelRequests {
     pub rescan_presets: bool,
 }
 
+/// projectM rates loudness against its own recent average, so our gain
+/// barely changes MilkDrop (only the size of drawn waveforms).
+const MILKDROP_LEVELS_NOTE: &str = "MilkDrop presets set their own levels, so sensitivity mostly affects the built-in visualizers.";
+
 const LOOPBACK_LABEL: &str = "Default output (what's playing)";
 
 /// Draws the settings window, editing `settings` in place. Sets `open` to
@@ -117,7 +121,9 @@ fn audio_section(
             .text("Sensitivity")
             .suffix(" dB")
             .step_by(1.0),
-    );
+    )
+    .on_hover_text(MILKDROP_LEVELS_NOTE);
+    ui.small(MILKDROP_LEVELS_NOTE);
     ui.add(
         egui::Slider::new(
             &mut settings.smoothing_secs,

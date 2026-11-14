@@ -79,7 +79,7 @@ You can also pick the device in the settings overlay (`Tab`).
 | `F` `F` (double-tap) | Span every monitor (one window per monitor, one picture across them); `F` or `Esc` to leave |
 | `←` / `→` | Previous / next visualizer |
 | `Esc` | Leave full screen, or quit when windowed |
-| `↑` / `↓` | Sensitivity up / down (3 dB steps) |
+| `↑` / `↓` | Sensitivity up / down (6 dB steps; MilkDrop presets set their own levels) |
 | `R` | Toggle random mode (auto-switch every N seconds) |
 | `Space` | Lock the current visualizer (pause random mode and MilkDrop preset changes) |
 | `Tab` | Settings overlay |

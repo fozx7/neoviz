@@ -66,7 +66,7 @@ Computed each frame and handed to visualizers as a read-only `AudioFrame`:
 - **Beat detection**: an energy-based onset detector on the bass band, giving `beat` plus `beat_intensity`. No tempo estimation.
 - **Silence detection**: `AudioFrame::silent` turns on after a few seconds below ~-60 dBFS.
 
-Sensitivity (3 dB steps) and smoothing are user settings.
+Sensitivity (6 dB steps, about a tenth of the bar height each) and smoothing are user settings. MilkDrop presets rate loudness against their own running average, so sensitivity barely affects them.
 
 **As built:** instead of a separate idle animation, the picture **fades to black** over 3 s once `silent` turns on, and **fades back in** over 0.75 s when sound returns (and at launch). It can be turned off in the overlay (*Fade out when the music stops*). `silent` also drives keep-awake (§8).
 
