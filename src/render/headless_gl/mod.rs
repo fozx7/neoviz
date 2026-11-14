@@ -71,6 +71,15 @@ impl HeadlessGl {
         Ok(())
     }
 
+    /// Forgets frames already being read back, so the next
+    /// [`read_previous_frame`](Self::read_previous_frame) returns nothing
+    /// rather than a frame from before (e.g. of the previous preset).
+    pub fn forget_frames(&mut self) {
+        if let Some(rb) = &mut self.readback {
+            rb.filled = [false; 2];
+        }
+    }
+
     /// Starts copying the frame just rendered into a GPU-side buffer, and
     /// fills `out` with the *previous* frame's pixels (RGBA8, bottom row
     /// first). Returns false if there was no previous frame yet.

@@ -56,7 +56,7 @@ Presets aren't included. A good start is the "cream of the crop" pack:
 git clone --depth 1 https://github.com/projectM-visualizer/presets-cream-of-the-crop ~/milkdrop-presets
 ```
 
-The folder can also be set in the settings overlay. MilkDrop then appears as one more visualizer. By default it shuffles through the presets, changing every 30 s; in the overlay you can turn shuffle or the timer off, or change the interval. `[` / `]` step back and forward through presets, and each new preset's name pops up briefly. projectM runs on its own thread, so slow-loading presets don't freeze the app.
+The folder can also be set in the settings overlay. MilkDrop then appears as one more visualizer. By default it shuffles through the presets, changing every 30 s; in the overlay you can turn shuffle or the timer off, or change the interval. `[` / `]` step back and forward through presets, and each new preset's name pops up briefly. The next preset is loaded in the background while the current one plays, so changes crossfade smoothly (2 s on the timer, half a second for `[` / `]`) instead of pausing while a preset compiles. Presets projectM can't load are skipped.
 
 projectM is LGPL-3.0 and is linked statically into MilkDrop builds. That's fine for personal use; if you distribute such a build, the LGPL requires that recipients can relink it against their own projectM. To build without it, use `--no-default-features`.
 
