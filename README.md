@@ -6,7 +6,7 @@ A retro-style music visualizer for Windows and Linux. It listens to whatever you
 
 ## Install
 
-Download the latest package from the repo's **Releases** page.
+Download the latest package from the repo's **Releases** page. There are x86-64 and ARM64 (`arm64`) builds for each OS.
 
 **Linux:** unpack and run the installer. It puts `neoviz` in `~/.local/bin` and adds neoViz to your app menu (no root needed):
 
@@ -100,7 +100,7 @@ Too fast or too flashy? In the overlay's **Motion** section, *Speed* slows the v
 
 Settings are saved automatically to `~/.config/neoviz/settings.toml` (Linux) or `%APPDATA%\neoviz\config\settings.toml` (Windows). The audio device is the exception: every launch starts on the current default output, and a device picked in the overlay or with `--device` lasts for that run only.
 
-Set `RUST_LOG=debug` for verbose logging.
+Each run writes a log to `neoviz.log` next to the settings file, which is the place to look if something doesn't start (on Windows there's no console). If MilkDrop can't start, the reason also shows in the overlay's MilkDrop section. Set `RUST_LOG=debug` for verbose logging.
 
 ## Releasing
 
@@ -110,4 +110,4 @@ Bump `version` in `Cargo.toml`, commit, then tag and push:
 git tag v1.0.0 && git push origin v1.0.0
 ```
 
-The Release workflow builds optimised Linux and Windows packages and publishes them as a GitHub release.
+The Release workflow builds optimised Linux and Windows packages (x86-64 and ARM64) and publishes them as a GitHub release.

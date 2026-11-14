@@ -22,8 +22,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
           - os: windows-latest
             target: windows-x86_64
+          - os: windows-11-arm
+            target: windows-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -33,6 +37,22 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
           libpulse-dev libegl-dev libgl-dev cmake g++
+
+      # projectM gets GLEW through vcpkg. The x64 Windows image has vcpkg;
+      # the ARM one may not, so fetch it there.
+      - name: Set up vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          if ($root -and (Test-Path "$root/scripts/buildsystems/vcpkg.cmake")) {
+            "vcpkg already at $root"
+          } else {
+            $root = "$env:RUNNER_TEMP\vcpkg"
+            git clone --depth 1 https://github.com/microsoft/vcpkg $root
+            & "$root\bootstrap-vcpkg.bat" -disableMetrics
+            "VCPKG_INSTALLATION_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
       - uses: dtolnay/rust-toolchain@stable
 

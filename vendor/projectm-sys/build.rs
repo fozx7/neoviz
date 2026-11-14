@@ -8,12 +8,19 @@
 // - Static libraries are linked by their real names (projectM's CMake adds
 //   a "lib" prefix on Windows), and GLEW, which projectM needs but which
 //   upstream never linked, is linked from vcpkg's manifest install.
+// - The vcpkg triplet follows the target CPU, so ARM64 Windows builds too.
 
 use std::env;
 use std::path::{Path, PathBuf};
 
-/// vcpkg triplet: static libraries, dynamic C runtime (matches Rust's default).
-const VCPKG_TRIPLET: &str = "x64-windows-static-md";
+/// vcpkg triplet for the target CPU: static libraries, dynamic C runtime
+/// (matches Rust's default).
+fn vcpkg_triplet() -> &'static str {
+    match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+        Ok("aarch64") => "arm64-windows-static-md",
+        _ => "x64-windows-static-md",
+    }
+}
 
 mod build_bindgen;
 use crate::build_bindgen::bindgen;
@@ -85,7 +92,7 @@ fn main() {
         env::set_var("VCPKG_ROOT", &vcpkg_root);
 
         // Define the installation path for vcpkg
-        let vcpkg_installed = vcpkg_root.join("installed").join("x64-windows-static-md");
+        let vcpkg_installed = vcpkg_root.join("installed").join(vcpkg_triplet());
         let vcpkg_installed_str = vcpkg_installed.to_str().unwrap();
 
         // Define projectM_Eval_DIR and store in a variable
@@ -102,7 +109,7 @@ fn main() {
             // Visual Studio (or CMAKE_GENERATOR, if set).
             .profile("Release")
             .define("CMAKE_TOOLCHAIN_FILE", vcpkg_toolchain_str)
-            .define("VCPKG_TARGET_TRIPLET", "x64-windows-static-md")
+            .define("VCPKG_TARGET_TRIPLET", vcpkg_triplet())
             .define(
                 "CMAKE_MSVC_RUNTIME_LIBRARY",
                 "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL",
@@ -249,7 +256,7 @@ fn link_vcpkg_glew(dst: &Path) {
     let lib_dir = dst
         .join("build")
         .join("vcpkg_installed")
-        .join(VCPKG_TRIPLET)
+        .join(vcpkg_triplet())
         .join("lib");
     let candidates = ["glew32", "glew32s", "libglew32"];
     let Some(name) = candidates
