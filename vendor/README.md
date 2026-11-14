@@ -16,3 +16,9 @@ Windows builds need vcpkg with `VCPKG_INSTALLATION_ROOT` set, which GitHub's Win
 To update: copy the new release from `~/.cargo/registry/src/*/projectm-sys-<version>`, reapply the `build.rs` changes (marked by the comment at its top), and drop the patch entirely if upstream fixes the Windows build.
 
 The crate is LGPL (see `LICENSE`), the same as projectM itself.
+
+## projectm 3.1.2 (patched)
+
+A copy of the [projectm](https://crates.io/crates/projectm) 1.x-API wrapper, also used through `[patch.crates-io]`. The only change is in `src/core.rs`: C strings are passed as `c_char` instead of `i8`. They're the same on x86-64 and Windows, but on ARM64 Linux `char` is unsigned, so upstream doesn't compile there. Drop the patch once upstream uses `c_char`.
+
+It's LGPL too (see its `LICENSE`).

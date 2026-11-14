@@ -70,4 +70,5 @@ milkdrop = [
 
 # projectm-sys with its Windows build fixed; see vendor/README.md.
 [patch.crates-io]
+projectm = { path = "vendor/projectm" }
 projectm-sys = { path = "vendor/projectm-sys" }
