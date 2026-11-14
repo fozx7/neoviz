@@ -1,6 +1,6 @@
 //! The settings panel (Tab) and the heads-up text.
 
-use std::path::Path;
+use std::{path::Path, sync::OnceLock};
 
 use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
 
@@ -192,7 +192,7 @@ fn milkdrop_section(
         ui.label("Preset folder");
         let field = ui.add(
             egui::TextEdit::singleline(&mut settings.preset_dir)
-                .hint_text("/path/to/presets")
+                .hint_text(preset_dir_hint())
                 .desired_width(260.0),
         );
         // Rescan when editing finishes (Enter or clicking away), not per keystroke.
@@ -218,6 +218,22 @@ fn milkdrop_section(
         ui.label(format!("{name}: {status}"));
     }
     ui.small("[ / ] step through presets while MilkDrop is showing.");
+}
+
+/// An example preset folder in the OS's own path style: the user's real
+/// home folder on Windows (`C:\Users\name\milkdrop-presets`), `~/...` elsewhere.
+fn preset_dir_hint() -> &'static str {
+    static HINT: OnceLock<String> = OnceLock::new();
+    HINT.get_or_init(|| {
+        if cfg!(windows) {
+            directories::BaseDirs::new().map_or_else(
+                || r"C:\Users\you\milkdrop-presets".to_owned(),
+                |d| d.home_dir().join("milkdrop-presets").display().to_string(),
+            )
+        } else {
+            "~/milkdrop-presets".to_owned()
+        }
+    })
 }
 
 fn motion_section(ui: &mut egui::Ui, settings: &mut Settings) {
