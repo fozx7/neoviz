@@ -188,14 +188,30 @@ fn run(
 /// fail at random (it saw extensions like ".milk\x01"). A `CString` fixes it,
 /// and also handles paths that aren't valid UTF-8.
 fn load_preset(pm: &ProjectM, path: &Path, smooth: bool) {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
-        log::warn!("skipping preset path with a NUL byte: {}", path.display());
+    let Some(c_path) = preset_c_path(path) else {
+        log::warn!(
+            "skipping preset path projectM can't take: {}",
+            path.display()
+        );
         return;
     };
     let handle = *pm.get_instance().borrow();
     // SAFETY: `handle` is live, and `c_path` is NUL-terminated and outlives the call.
     unsafe { projectm_sys::projectm_load_preset_file(handle, c_path.as_ptr(), smooth) };
+}
+
+/// The path as projectM's C API wants it: the raw bytes on Unix, UTF-8 on
+/// Windows (where an `OsStr` isn't bytes). None if it has a NUL byte, or
+/// on Windows isn't valid Unicode.
+fn preset_c_path(path: &Path) -> Option<CString> {
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes()
+    };
+    #[cfg(not(unix))]
+    let bytes = path.to_str()?.as_bytes();
+    CString::new(bytes).ok()
 }
 
 /// Registers projectM's "preset failed to load" callback through the raw API,
@@ -286,6 +302,17 @@ mod tests {
         let ptr = garbage.as_ptr().cast::<c_char>();
         unsafe { on_load_failed(ptr, ptr, user_data) };
         assert!(flag.get());
+    }
+
+    #[test]
+    fn preset_paths_become_nul_terminated_c_strings() {
+        let c_path = preset_c_path(Path::new("presets/a b.milk")).unwrap();
+        assert_eq!(c_path.as_bytes_with_nul(), b"presets/a b.milk\0");
+    }
+
+    #[test]
+    fn preset_paths_with_a_nul_byte_are_refused() {
+        assert!(preset_c_path(Path::new("bad\0name.milk")).is_none());
     }
 
     #[test]
