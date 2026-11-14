@@ -2,6 +2,9 @@
 //! [`Session`].
 
 mod awake;
+mod fade;
+pub mod frame_stats;
+mod icon;
 mod layout;
 mod session;
 
@@ -78,7 +81,7 @@ impl App {
 
     fn start(&self, event_loop: &ActiveEventLoop) -> Result<Session> {
         let monitor = pick_monitor(event_loop, self.args.monitor)?;
-        let mut attrs = Window::default_attributes()
+        let mut attrs = icon::apply(Window::default_attributes())
             .with_title("neoViz")
             .with_inner_size(WINDOWED_SIZE)
             .with_decorations(!self.settings.borderless);
@@ -98,8 +101,8 @@ impl App {
 
         let window = Arc::new(event_loop.create_window(attrs).context("creating window")?);
         let (gpu, main) = pollster::block_on(Gpu::new(event_loop.owned_display_handle(), window))?;
-        let visualizers = viz::create_all(gpu.device(), main.size());
-        let names: Vec<&str> = visualizers.iter().map(|v| v.name()).collect();
+        let lineup = viz::create_all(gpu.device(), main.size());
+        let names: Vec<&str> = lineup.visualizers.iter().map(|v| v.name()).collect();
         let start = match (&self.args.visualizer, &self.settings.visualizer) {
             // An explicit --visualizer must exist; a remembered one may have been renamed.
             (Some(wanted), _) => find_by_name(&names, wanted)?,
@@ -109,7 +112,7 @@ impl App {
         let mut session = Session::new(
             gpu,
             main,
-            visualizers,
+            lineup,
             start,
             self.settings.clone(),
             self.saved.clone(),

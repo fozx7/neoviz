@@ -8,7 +8,7 @@ mod color;
 mod common;
 mod layered;
 mod lightshow;
-#[cfg(all(feature = "milkdrop", target_os = "linux"))]
+#[cfg(milkdrop)]
 mod milkdrop;
 mod particles;
 mod scope;
@@ -40,8 +40,18 @@ pub trait Visualizer {
         None
     }
 
+    /// The user locked (`Space`) or unlocked the current visualizer. While
+    /// locked, a visualizer with its own presets must not change them on a timer.
+    fn set_locked(&mut self, _locked: bool) {}
+
     /// A message to show as a toast (e.g. "switched to preset X"), taken once.
     fn take_message(&mut self) -> Option<String> {
+        None
+    }
+
+    /// What it's showing within itself, if it has more than one thing
+    /// (e.g. the MilkDrop preset on screen).
+    fn showing(&self) -> Option<String> {
         None
     }
 
@@ -62,9 +72,18 @@ pub trait Visualizer {
     );
 }
 
+/// The visualizers that started, plus why any that couldn't didn't.
+pub struct Lineup {
+    pub visualizers: Vec<Box<dyn Visualizer>>,
+    /// (visualizer name, reason) for each one that failed to start.
+    pub failures: Vec<(String, String)>,
+}
+
 /// Every built-in visualizer, in rotation order: the seven main ones first,
 /// then the alternate variants.
-pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visualizer>> {
+pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Lineup {
+    #[allow(unused_mut)] // only pushed to when MilkDrop is built in
+    let mut failures = Vec::new();
     use bars::{Bars, BarsVariant};
     use layered::{Kind, Layered};
     use scope::{Scope, ScopeVariant};
@@ -77,10 +96,13 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visual
         Box::new(lightshow::Lightshow::new(device, size)),
         Box::new(starfield::Starfield::new(device, size)),
     ];
-    #[cfg(all(feature = "milkdrop", target_os = "linux"))]
+    #[cfg(milkdrop)]
     match milkdrop::MilkDrop::new(device, size) {
         Ok(m) => all.push(Box::new(m)),
-        Err(e) => log::error!("MilkDrop unavailable: {e:#}"),
+        Err(e) => {
+            log::error!("MilkDrop unavailable: {e:#}");
+            failures.push(("MilkDrop".to_owned(), format!("couldn't start: {e:#}")));
+        }
     }
     all.extend([
         Box::new(Bars::new(device, BarsVariant::Led)) as Box<dyn Visualizer>,
@@ -88,7 +110,10 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Vec<Box<dyn Visual
         Box::new(Bars::new(device, BarsVariant::Mirror)),
         Box::new(Scope::new(device, size, ScopeVariant::StereoXy)),
     ]);
-    all
+    Lineup {
+        visualizers: all,
+        failures,
+    }
 }
 
 /// Tracks which visualizer is showing and any crossfade in progress.

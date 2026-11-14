@@ -51,6 +51,8 @@ pub struct Settings {
     pub bloom: bool,
     pub scanlines: bool,
     pub show_fps: bool,
+    /// The FPS counter shows lows, frame times and a graph, not just the rate.
+    pub fps_detail: bool,
     pub always_on_top: bool,
     pub borderless: bool,
     /// Folder searched (recursively) for MilkDrop `.milk` presets; empty = none.
@@ -68,6 +70,9 @@ pub struct Settings {
     pub flash: f32,
     /// Keep the screen from blanking while visualizing.
     pub keep_awake: KeepAwake,
+    /// Fade the picture to black when the audio goes silent, and back in
+    /// when sound returns.
+    pub fade_on_silence: bool,
 }
 
 impl Default for Settings {
@@ -84,6 +89,7 @@ impl Default for Settings {
             bloom: true,
             scanlines: false,
             show_fps: false,
+            fps_detail: false,
             always_on_top: false,
             borderless: false,
             preset_dir: String::new(),
@@ -93,6 +99,7 @@ impl Default for Settings {
             speed: 1.0,
             flash: 1.0,
             keep_awake: KeepAwake::default(),
+            fade_on_silence: true,
         }
     }
 }

@@ -42,7 +42,6 @@ jobs:
         run: cargo test --locked
 
       - name: Check without MilkDrop
-        if: runner.os == 'Linux'
         run: cargo clippy --all-targets --locked --no-default-features -- -D warnings
 
       - name: Build release

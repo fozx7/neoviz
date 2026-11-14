@@ -31,9 +31,10 @@ const BEAT_MAX_HZ: f32 = 150.0;
 const SILENCE_RMS: f32 = 0.001;
 /// Seconds of continuous silence before [`AudioFrame::silent`] turns on.
 const SILENCE_AFTER_SECS: f32 = 2.0;
-/// Sensitivity limits and step for the up/down keys.
+/// Sensitivity limits and step for the up/down keys. Levels span 58 dB, so
+/// each step moves the bars by about a tenth of their height.
 pub const GAIN_LIMIT_DB: f32 = 24.0;
-pub const GAIN_STEP_DB: f32 = 3.0;
+pub const GAIN_STEP_DB: f32 = 6.0;
 
 /// Everything a visualizer gets about the audio for one frame.
 #[derive(Debug, Clone, Copy)]
@@ -64,7 +65,7 @@ pub struct AudioFrame<'a> {
     pub silent: bool,
     /// Stereo frames captured since the previous analysis (the newest
     /// `new_frames` entries of `left`/`right`, capped at their length).
-    #[cfg_attr(not(all(feature = "milkdrop", target_os = "linux")), allow(dead_code))]
+    #[cfg_attr(not(milkdrop), allow(dead_code))]
     pub new_frames: usize,
 }
 

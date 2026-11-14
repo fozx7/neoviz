@@ -22,8 +22,12 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x86_64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
           - os: windows-latest
             target: windows-x86_64
+          - os: windows-11-arm
+            target: windows-arm64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -33,6 +37,22 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
           libpulse-dev libegl-dev libgl-dev cmake g++
+
+      # projectM gets GLEW through vcpkg. The x64 Windows image has vcpkg;
+      # the ARM one may not, so fetch it there.
+      - name: Set up vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $root = $env:VCPKG_INSTALLATION_ROOT
+          if ($root -and (Test-Path "$root/scripts/buildsystems/vcpkg.cmake")) {
+            "vcpkg already at $root"
+          } else {
+            $root = "$env:RUNNER_TEMP\vcpkg"
+            git clone --depth 1 https://github.com/microsoft/vcpkg $root
+            & "$root\bootstrap-vcpkg.bat" -disableMetrics
+            "VCPKG_INSTALLATION_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append
+          }
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -48,7 +68,7 @@ jobs:
         run: |
           name="neoviz-${GITHUB_REF_NAME//\//-}-${{ matrix.target }}"
           mkdir "$name"
-          cp target/dist/neoviz README.md LICENSE packaging/linux/* "$name/"
+          cp target/dist/neoviz README.md LICENSE packaging/THIRD-PARTY-NOTICES.md packaging/LICENSE-LGPL-2.1.txt packaging/linux/* "$name/"
           tar czf "$name.tar.gz" "$name"
           echo "PACKAGE=$name.tar.gz" >> "$GITHUB_ENV"
 
@@ -58,7 +78,7 @@ jobs:
         run: |
           $name = "neoviz-$($env:GITHUB_REF_NAME -replace '/', '-')-${{ matrix.target }}"
           New-Item -ItemType Directory $name | Out-Null
-          Copy-Item target/dist/neoviz.exe, README.md, LICENSE $name
+          Copy-Item target/dist/neoviz.exe, README.md, LICENSE, packaging/THIRD-PARTY-NOTICES.md, packaging/LICENSE-LGPL-2.1.txt $name
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           "PACKAGE=$name.zip" | Out-File -FilePath $env:GITHUB_ENV -Append
 

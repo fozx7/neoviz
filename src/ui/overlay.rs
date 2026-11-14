@@ -1,6 +1,6 @@
 //! The settings panel (Tab) and the heads-up text.
 
-use std::path::Path;
+use std::{path::Path, sync::OnceLock};
 
 use egui::{Align2, Color32, FontId, Id, LayerId, Order, Pos2};
 
@@ -11,7 +11,10 @@ use crate::{
     },
 };
 
-use super::Toast;
+use super::{
+    Toast,
+    fps_hud::{self, FpsHud},
+};
 
 /// What the panel needs to show besides the settings themselves.
 pub struct PanelInfo<'a> {
@@ -39,6 +42,10 @@ pub struct PanelRequests {
     pub rescan_presets: bool,
 }
 
+/// projectM rates loudness against its own recent average, so our gain
+/// barely changes MilkDrop (only the size of drawn waveforms).
+const MILKDROP_LEVELS_NOTE: &str = "MilkDrop presets set their own levels, so sensitivity mostly affects the built-in visualizers.";
+
 const LOOPBACK_LABEL: &str = "Default output (what's playing)";
 
 /// Draws the settings window, editing `settings` in place. Sets `open` to
@@ -61,7 +68,7 @@ pub fn settings_panel(
                 ui.separator();
                 visualizer_section(ui, settings, info, &mut requests);
                 ui.separator();
-                if cfg!(all(feature = "milkdrop", target_os = "linux")) {
+                if cfg!(milkdrop) {
                     milkdrop_section(ui, settings, info, &mut requests);
                     ui.separator();
                 }
@@ -117,7 +124,9 @@ fn audio_section(
             .text("Sensitivity")
             .suffix(" dB")
             .step_by(1.0),
-    );
+    )
+    .on_hover_text(MILKDROP_LEVELS_NOTE);
+    ui.small(MILKDROP_LEVELS_NOTE);
     ui.add(
         egui::Slider::new(
             &mut settings.smoothing_secs,
@@ -183,7 +192,7 @@ fn milkdrop_section(
         ui.label("Preset folder");
         let field = ui.add(
             egui::TextEdit::singleline(&mut settings.preset_dir)
-                .hint_text("/path/to/presets")
+                .hint_text(preset_dir_hint())
                 .desired_width(260.0),
         );
         // Rescan when editing finishes (Enter or clicking away), not per keystroke.
@@ -209,6 +218,22 @@ fn milkdrop_section(
         ui.label(format!("{name}: {status}"));
     }
     ui.small("[ / ] step through presets while MilkDrop is showing.");
+}
+
+/// An example preset folder in the OS's own path style: the user's real
+/// home folder on Windows (`C:\Users\name\milkdrop-presets`), `~/...` elsewhere.
+fn preset_dir_hint() -> &'static str {
+    static HINT: OnceLock<String> = OnceLock::new();
+    HINT.get_or_init(|| {
+        if cfg!(windows) {
+            directories::BaseDirs::new().map_or_else(
+                || r"C:\Users\you\milkdrop-presets".to_owned(),
+                |d| d.home_dir().join("milkdrop-presets").display().to_string(),
+            )
+        } else {
+            "~/milkdrop-presets".to_owned()
+        }
+    })
 }
 
 fn motion_section(ui: &mut egui::Ui, settings: &mut Settings) {
@@ -240,11 +265,26 @@ fn display_section(ui: &mut egui::Ui, settings: &mut Settings, keeping_awake: bo
         ui.checkbox(&mut settings.bloom, "Bloom");
         ui.checkbox(&mut settings.scanlines, "CRT scanlines");
         ui.checkbox(&mut settings.show_fps, "FPS counter");
+        ui.add_enabled(
+            settings.show_fps,
+            egui::Checkbox::new(&mut settings.fps_detail, "Detailed"),
+        )
+        .on_hover_text(
+            "Adds 1% / 5% lows, frame times, how long each frame spends working vs \
+             waiting for the display, late (dropped) frames, and a frame-time graph.",
+        );
     });
     ui.horizontal(|ui| {
         ui.checkbox(&mut settings.always_on_top, "Always on top");
         ui.checkbox(&mut settings.borderless, "Borderless window");
     });
+    ui.checkbox(
+        &mut settings.fade_on_silence,
+        "Fade out when the music stops",
+    )
+    .on_hover_text(
+        "Fade to black after a couple of seconds of silence, and back in when sound returns.",
+    );
     ui.horizontal(|ui| {
         ui.label("Keep screen on");
         let options = [
@@ -281,7 +321,7 @@ fn footer(ui: &mut egui::Ui, info: &PanelInfo) {
 /// Text drawn straight onto the screen, outside any window.
 pub struct Hud<'a> {
     pub toast: Option<&'a Toast>,
-    pub fps: Option<f32>,
+    pub fps: Option<FpsHud>,
     pub capture_error: Option<&'a str>,
 }
 
@@ -301,18 +341,8 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
             toast.alpha(),
         );
     }
-    if let Some(fps) = hud.fps {
-        let pos = Pos2::new(screen.right() - 12.0, screen.top() + 8.0);
-        let text = format!("{fps:.0} fps");
-        shadowed_text(
-            &painter,
-            pos,
-            Align2::RIGHT_TOP,
-            &text,
-            16.0,
-            Color32::LIGHT_GREEN,
-            1.0,
-        );
+    if let Some(fps) = &hud.fps {
+        fps_hud::draw(&painter, screen, fps);
     }
     if let Some(err) = hud.capture_error {
         let pos = Pos2::new(screen.center().x, screen.top() + 16.0);
@@ -329,7 +359,7 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
     }
 }
 
-fn shadowed_text(
+pub(super) fn shadowed_text(
     painter: &egui::Painter,
     pos: Pos2,
     anchor: Align2,

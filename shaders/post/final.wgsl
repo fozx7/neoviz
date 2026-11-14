@@ -3,8 +3,8 @@
 struct Params {
     bloom_strength: f32,
     scanlines: f32,   // 1.0 = on
-    _pad0: f32,
-    _pad1: f32,
+    brightness: f32,  // 0 = black (faded out on silence), 1 = full
+    _pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -29,5 +29,6 @@ fn fs(in: FullscreenOut) -> @location(0) vec4f {
         let d = in.uv - 0.5;
         col *= 1.0 - dot(d, d) * 0.7;
     }
+    col *= p.brightness;
     return vec4f(clamp(col, vec3f(0.0), vec3f(1.0)), 1.0);
 }

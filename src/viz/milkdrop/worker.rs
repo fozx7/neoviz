@@ -30,10 +30,9 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum Command {
     /// Interleaved stereo samples, -1..1.
     Audio(Vec<f32>),
-    Load {
-        path: PathBuf,
-        smooth: bool,
-    },
+    /// Load a preset (a hard cut: crossfades are done on our side), then
+    /// render one unseen frame so it's warmed up for when it goes on screen.
+    Load(PathBuf),
     /// Render a frame at this size.
     Render((u32, u32)),
     /// Hand a pixel buffer back for reuse.
@@ -41,6 +40,8 @@ pub enum Command {
 }
 
 pub enum Event {
+    /// The preset loaded and is ready to show; frames from now on are of it.
+    Loaded { path: PathBuf },
     /// projectM couldn't load this preset (under 1% of the cream-of-the-crop
     /// pack: shader syntax it can't translate) and kept the previous one.
     LoadFailed { path: PathBuf },
@@ -130,6 +131,11 @@ fn run(
             return;
         }
     };
+    #[cfg(windows)]
+    if let Err(e) = super::glew::init(&gl.gl) {
+        let _ = ready.send(Err(e));
+        return;
+    }
     // projectM needs its GL context current (on this thread) when created.
     let pm = ProjectM::create();
     pm.set_window_size(size.0 as usize, size.1 as usize);
@@ -154,12 +160,18 @@ fn run(
                         pm.pcm_add_float(chunk, 2);
                     }
                 }
-                Command::Load { path, smooth } => {
+                Command::Load(path) => {
                     // The callback fires during this call if the load fails.
                     load_failed.set(false);
-                    load_preset(&pm, &path, smooth);
+                    load_preset(&pm, &path);
                     if load_failed.get() {
                         let _ = events.send(Event::LoadFailed { path });
+                    } else {
+                        // No frames of the old preset from here on.
+                        gl.forget_frames();
+                        // Some of a preset's setup happens on its first frame.
+                        pm.render_frame();
+                        let _ = events.send(Event::Loaded { path });
                     }
                 }
                 Command::Render(size) => render = Some(size),
@@ -182,15 +194,31 @@ fn run(
 /// a terminating NUL, so projectM reads past the end of the path and loads
 /// fail at random (it saw extensions like ".milk\x01"). A `CString` fixes it,
 /// and also handles paths that aren't valid UTF-8.
-fn load_preset(pm: &ProjectM, path: &Path, smooth: bool) {
-    use std::os::unix::ffi::OsStrExt;
-    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
-        log::warn!("skipping preset path with a NUL byte: {}", path.display());
+fn load_preset(pm: &ProjectM, path: &Path) {
+    let Some(c_path) = preset_c_path(path) else {
+        log::warn!(
+            "skipping preset path projectM can't take: {}",
+            path.display()
+        );
         return;
     };
     let handle = *pm.get_instance().borrow();
     // SAFETY: `handle` is live, and `c_path` is NUL-terminated and outlives the call.
-    unsafe { projectm_sys::projectm_load_preset_file(handle, c_path.as_ptr(), smooth) };
+    unsafe { projectm_sys::projectm_load_preset_file(handle, c_path.as_ptr(), false) };
+}
+
+/// The path as projectM's C API wants it: the raw bytes on Unix, UTF-8 on
+/// Windows (where an `OsStr` isn't bytes). None if it has a NUL byte, or
+/// on Windows isn't valid Unicode.
+fn preset_c_path(path: &Path) -> Option<CString> {
+    #[cfg(unix)]
+    let bytes = {
+        use std::os::unix::ffi::OsStrExt;
+        path.as_os_str().as_bytes()
+    };
+    #[cfg(not(unix))]
+    let bytes = path.to_str()?.as_bytes();
+    CString::new(bytes).ok()
 }
 
 /// Registers projectM's "preset failed to load" callback through the raw API,
@@ -281,6 +309,17 @@ mod tests {
         let ptr = garbage.as_ptr().cast::<c_char>();
         unsafe { on_load_failed(ptr, ptr, user_data) };
         assert!(flag.get());
+    }
+
+    #[test]
+    fn preset_paths_become_nul_terminated_c_strings() {
+        let c_path = preset_c_path(Path::new("presets/a b.milk")).unwrap();
+        assert_eq!(c_path.as_bytes_with_nul(), b"presets/a b.milk\0");
+    }
+
+    #[test]
+    fn preset_paths_with_a_nul_byte_are_refused() {
+        assert!(preset_c_path(Path::new("bad\0name.milk")).is_none());
     }
 
     #[test]

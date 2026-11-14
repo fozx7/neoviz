@@ -3,7 +3,7 @@ pub mod compositor;
 pub mod debug_view;
 pub mod feedback;
 pub mod gpu;
-#[cfg(all(feature = "milkdrop", target_os = "linux"))]
+#[cfg(milkdrop)]
 pub mod headless_gl;
 pub mod layer;
 pub mod lines;

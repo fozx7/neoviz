@@ -1,7 +1,11 @@
 //! Everything that exists while the window is open: GPU, audio, visualizers,
 //! UI and settings, plus the per-frame loop.
 
-use std::{path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use winit::{
@@ -13,6 +17,8 @@ use winit::{
 
 use super::{
     awake::Awake,
+    fade::SilenceFade,
+    frame_stats::{FrameStats, FrameTiming},
     layout::{self, Rect},
 };
 
@@ -32,9 +38,10 @@ use crate::{
     },
     ui::{
         Toast, Ui,
+        fps_hud::{FpsDetail, FpsHud},
         overlay::{self, Hud, PanelInfo},
     },
-    viz::{AutoSwitch, Rng, Switcher, Visualizer},
+    viz::{AutoSwitch, Lineup, Rng, Switcher, Visualizer},
 };
 
 const WINDOW_TITLE: &str = "neoViz";
@@ -44,8 +51,6 @@ pub const WINDOWED_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 const MAX_FRAME_DT: f32 = 0.1;
 /// How often changed settings are written to disk.
 const SAVE_INTERVAL_SECS: f32 = 1.0;
-/// Smoothing for the FPS counter.
-const FPS_SMOOTHING: f32 = 0.05;
 
 /// What the event loop should do after an action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,6 +83,8 @@ pub struct Session {
     /// What's on disk, to know when to save.
     saved: Settings,
     config_path: Option<PathBuf>,
+    /// (visualizer, reason) for visualizers that couldn't start, shown in the overlay.
+    startup_failures: Vec<(String, String)>,
     since_save: f32,
     devices: Vec<DeviceInfo>,
     device_list_error: Option<String>,
@@ -86,7 +93,8 @@ pub struct Session {
     locked: bool,
     toast: Option<Toast>,
     awake: Awake,
-    fps: f32,
+    fade: SilenceFade,
+    frame_stats: FrameStats,
     last_frame: Instant,
 }
 
@@ -94,14 +102,17 @@ impl Session {
     pub fn new(
         gpu: Gpu,
         main: Display,
-        visualizers: Vec<Box<dyn Visualizer>>,
+        lineup: Lineup,
         start: usize,
         settings: Settings,
         saved: Settings,
         config_path: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let size = main.size();
-        let mut visualizers = visualizers;
+        let Lineup {
+            mut visualizers,
+            failures: startup_failures,
+        } = lineup;
         for v in &mut visualizers {
             v.configure(&settings, true);
         }
@@ -119,6 +130,7 @@ impl Session {
             rng: Rng::new(seed_from_clock()),
             visualizers,
             names,
+            startup_failures,
             settings,
             saved,
             config_path,
@@ -129,7 +141,8 @@ impl Session {
             show_settings: false,
             locked: false,
             awake: Awake::default(),
-            fps: 60.0,
+            fade: SilenceFade::default(),
+            frame_stats: FrameStats::default(),
             last_frame: Instant::now(),
             displays: vec![main],
             slices: vec![WHOLE],
@@ -241,7 +254,7 @@ impl Session {
         event_loop: &ActiveEventLoop,
         monitor: &MonitorHandle,
     ) -> Result<Display> {
-        let attrs = Window::default_attributes()
+        let attrs = super::icon::apply(Window::default_attributes())
             .with_title(WINDOW_TITLE)
             .with_decorations(false)
             .with_position(monitor.position())
@@ -344,9 +357,6 @@ impl Session {
         // Clamp so a stall (e.g. dragging the window) doesn't cause a huge jump.
         let dt = (now - self.last_frame).as_secs_f32().min(MAX_FRAME_DT);
         self.last_frame = now;
-        if dt > 0.0 {
-            self.fps += (1.0 / dt - self.fps) * FPS_SMOOTHING;
-        }
 
         self.analyzer.settings = BandSettings {
             gain_db: self.settings.sensitivity_db,
@@ -360,6 +370,7 @@ impl Session {
             (audio.beat.then_some(audio.beat_intensity), audio.silent)
         };
         self.awake.update(self.settings.keep_awake, silent, dt);
+        self.fade.update(self.settings.fade_on_silence, silent, dt);
         if self.settings.random_mode
             && !self.locked
             && self.auto_switch.tick(
@@ -402,13 +413,20 @@ impl Session {
                 self.visualizers[index].update(&calmed, motion_dt);
             }
         }
-        self.draw(size);
+        let wait = self.draw(size);
         self.save_if_changed(dt);
+        let total = now.elapsed().as_secs_f32();
+        self.frame_stats.record(FrameTiming {
+            dt,
+            work: (total - wait).max(0.0),
+            wait,
+        });
         self.window().request_redraw();
     }
 
     /// Renders the frame into the canvas, then copies each display its slice.
-    fn draw(&mut self, size: (u32, u32)) {
+    /// Returns the seconds spent blocked on the displays (acquire + present).
+    fn draw(&mut self, size: (u32, u32)) -> f32 {
         let current = self.switcher.current();
         let mix = self.switcher.mix();
         let post = PostFx {
@@ -438,12 +456,17 @@ impl Session {
                 self.compositor.slot(INCOMING),
                 size,
             );
-            self.compositor.draw(queue, &mut encoder, canvas, mix, post);
+            let brightness = self.fade.brightness();
+            self.compositor
+                .draw(queue, &mut encoder, canvas, mix, post, brightness);
         }
 
+        let mut wait = Duration::ZERO;
         let mut frames = Vec::with_capacity(self.displays.len());
         for (i, display) in self.displays.iter_mut().enumerate() {
+            let started = Instant::now();
             let frame = display.acquire(&self.gpu);
+            wait += started.elapsed();
             if let Some(frame) = &frame {
                 let slice = self.slices.get(i).copied().unwrap_or(WHOLE);
                 self.canvas
@@ -457,10 +480,26 @@ impl Session {
             frames.push(frame);
         }
         queue.submit([encoder.finish()]);
+        let started = Instant::now();
         for (display, frame) in self.displays.iter_mut().zip(frames) {
             if let Some(frame) = frame {
                 display.present(&self.gpu, frame);
             }
+        }
+        wait += started.elapsed();
+        wait.as_secs_f32()
+    }
+
+    /// What's on screen, e.g. "Bars & Peaks" or "MilkDrop: preset name".
+    fn showing(&self) -> String {
+        if self.show_debug {
+            return "Analysis debug view".to_owned();
+        }
+        let current = self.switcher.current();
+        let name = &self.names[current];
+        match self.visualizers[current].showing() {
+            Some(item) => format!("{name}: {item}"),
+            None => name.clone(),
         }
     }
 
@@ -478,15 +517,27 @@ impl Session {
             locked: self.locked,
             config_path: self.config_path.as_deref(),
             statuses: self
-                .visualizers
+                .startup_failures
                 .iter()
-                .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s)))
+                .cloned()
+                .chain(
+                    self.visualizers
+                        .iter()
+                        .filter_map(|v| v.status().map(|s| (v.name().to_owned(), s))),
+                )
                 .collect(),
             keeping_awake: self.awake.is_holding(),
         };
         let hud = Hud {
             toast: self.toast.as_ref(),
-            fps: self.settings.show_fps.then_some(self.fps),
+            fps: self.settings.show_fps.then(|| FpsHud {
+                fps: self.frame_stats.fps(),
+                detail: self.settings.fps_detail.then(|| FpsDetail {
+                    showing: self.showing(),
+                    figures: *self.frame_stats.detail(),
+                    recent_ms: self.frame_stats.recent_ms(),
+                }),
+            }),
             capture_error: capture_error.as_deref(),
         };
         let mut requests = Default::default();
@@ -559,6 +610,9 @@ impl Session {
 
     fn toggle_lock(&mut self) {
         self.locked = !self.locked;
+        for v in &mut self.visualizers {
+            v.set_locked(self.locked);
+        }
         let text = if self.locked { "Locked" } else { "Unlocked" };
         self.toast = Some(Toast::new(text));
     }
