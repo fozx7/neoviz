@@ -126,7 +126,10 @@ impl Gpu {
         config.format = self.surface_format;
         // FIFO = vsync: steady frame pacing and no tearing, supported everywhere.
         config.present_mode = wgpu::PresentMode::Fifo;
-        config.desired_maximum_frame_latency = 1;
+        // Two frames in flight: with one, any frame that runs a little long
+        // (a slow GPU, a MilkDrop readback) misses vsync and shows twice,
+        // which reads as jitter. Costs one frame (~16 ms) of latency.
+        config.desired_maximum_frame_latency = 2;
         if self.ui_format != self.surface_format {
             config.view_formats.push(self.ui_format);
         }

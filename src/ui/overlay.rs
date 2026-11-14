@@ -288,7 +288,8 @@ fn footer(ui: &mut egui::Ui, info: &PanelInfo) {
 /// Text drawn straight onto the screen, outside any window.
 pub struct Hud<'a> {
     pub toast: Option<&'a Toast>,
-    pub fps: Option<f32>,
+    /// (frames per second, worst frame time in ms) over the last second.
+    pub fps: Option<(f32, f32)>,
     pub capture_error: Option<&'a str>,
 }
 
@@ -308,9 +309,9 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
             toast.alpha(),
         );
     }
-    if let Some(fps) = hud.fps {
+    if let Some((fps, worst_ms)) = hud.fps {
         let pos = Pos2::new(screen.right() - 12.0, screen.top() + 8.0);
-        let text = format!("{fps:.0} fps");
+        let text = format!("{fps:.0} fps · worst {worst_ms:.0} ms");
         shadowed_text(
             &painter,
             pos,

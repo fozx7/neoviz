@@ -14,6 +14,7 @@ use winit::{
 use super::{
     awake::Awake,
     fade::SilenceFade,
+    frame_stats::FrameStats,
     layout::{self, Rect},
 };
 
@@ -45,8 +46,6 @@ pub const WINDOWED_SIZE: LogicalSize<f64> = LogicalSize::new(1280.0, 720.0);
 const MAX_FRAME_DT: f32 = 0.1;
 /// How often changed settings are written to disk.
 const SAVE_INTERVAL_SECS: f32 = 1.0;
-/// Smoothing for the FPS counter.
-const FPS_SMOOTHING: f32 = 0.05;
 
 /// What the event loop should do after an action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +89,7 @@ pub struct Session {
     toast: Option<Toast>,
     awake: Awake,
     fade: SilenceFade,
-    fps: f32,
+    frame_stats: FrameStats,
     last_frame: Instant,
 }
 
@@ -138,7 +137,7 @@ impl Session {
             locked: false,
             awake: Awake::default(),
             fade: SilenceFade::default(),
-            fps: 60.0,
+            frame_stats: FrameStats::default(),
             last_frame: Instant::now(),
             displays: vec![main],
             slices: vec![WHOLE],
@@ -353,9 +352,7 @@ impl Session {
         // Clamp so a stall (e.g. dragging the window) doesn't cause a huge jump.
         let dt = (now - self.last_frame).as_secs_f32().min(MAX_FRAME_DT);
         self.last_frame = now;
-        if dt > 0.0 {
-            self.fps += (1.0 / dt - self.fps) * FPS_SMOOTHING;
-        }
+        self.frame_stats.record(dt);
 
         self.analyzer.settings = BandSettings {
             gain_db: self.settings.sensitivity_db,
@@ -503,7 +500,7 @@ impl Session {
         };
         let hud = Hud {
             toast: self.toast.as_ref(),
-            fps: self.settings.show_fps.then_some(self.fps),
+            fps: self.settings.show_fps.then(|| self.frame_stats.report()),
             capture_error: capture_error.as_deref(),
         };
         let mut requests = Default::default();
