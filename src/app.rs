@@ -4,6 +4,7 @@
 mod awake;
 mod fade;
 pub mod frame_stats;
+mod icon;
 mod layout;
 mod session;
 
@@ -80,7 +81,7 @@ impl App {
 
     fn start(&self, event_loop: &ActiveEventLoop) -> Result<Session> {
         let monitor = pick_monitor(event_loop, self.args.monitor)?;
-        let mut attrs = Window::default_attributes()
+        let mut attrs = icon::apply(Window::default_attributes())
             .with_title("neoViz")
             .with_inner_size(WINDOWED_SIZE)
             .with_decorations(!self.settings.borderless);

@@ -5,6 +5,8 @@ GenericName=Music Visualizer
 Comment=Retro-style visualizer for whatever your computer is playing
 Exec=neoviz
 Icon=neoviz
+# Matches the app ID the window sets, so its taskbar entry uses this icon.
+StartupWMClass=neoviz
 Terminal=false
 Categories=AudioVideo;Audio;
 Keywords=music;visualizer;visualiser;milkdrop;spectrum;

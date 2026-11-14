@@ -254,7 +254,7 @@ impl Session {
         event_loop: &ActiveEventLoop,
         monitor: &MonitorHandle,
     ) -> Result<Display> {
-        let attrs = Window::default_attributes()
+        let attrs = super::icon::apply(Window::default_attributes())
             .with_title(WINDOW_TITLE)
             .with_decorations(false)
             .with_position(monitor.position())

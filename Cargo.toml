@@ -16,6 +16,7 @@ egui-winit = "0.37"
 env_logger = "0.11"
 keepawake = "0.6"
 log = "0.4"
+png = "0.18"
 pollster = "1"
 realfft = "3.5"
 rtrb = "0.4"
@@ -72,3 +73,6 @@ milkdrop = [
 [patch.crates-io]
 projectm = { path = "vendor/projectm" }
 projectm-sys = { path = "vendor/projectm-sys" }
+
+[build-dependencies]
+embed-resource = "3"

@@ -104,6 +104,10 @@ Settings are saved automatically to `~/.config/neoviz/settings.toml` (Linux) or 
 
 Each run writes a log to `neoviz.log` next to the settings file, which is the place to look if something doesn't start (on Windows there's no console). If MilkDrop can't start, the reason also shows in the overlay's MilkDrop section. Set `RUST_LOG=debug` for verbose logging.
 
+## App icon
+
+All icon files are generated from one source image: run `packaging/make-icons.sh icon.svg` (or a square PNG of 512 px or more; needs ImageMagick, plus `rsvg-convert` for SVG). It writes the window icon built into the binary, the Windows `.exe` icon and the Linux app-menu icon. On Wayland the window's icon comes from the installed app-menu entry, so it shows once neoViz is installed with `install.sh`.
+
 ## Releasing
 
 Bump `version` in `Cargo.toml`, commit, then tag and push:
