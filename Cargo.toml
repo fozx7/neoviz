@@ -1,6 +1,6 @@
 [package]
 name = "neoviz"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "Retro-style system-audio visualizer for Windows and Linux"
 license = "MIT"
