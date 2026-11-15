@@ -17,6 +17,7 @@ use winit::{
 
 use super::{
     awake::Awake,
+    cursor::CursorHider,
     fade::SilenceFade,
     frame_stats::{FrameStats, FrameTiming},
     layout::{self, Rect},
@@ -94,6 +95,7 @@ pub struct Session {
     toast: Option<Toast>,
     awake: Awake,
     fade: SilenceFade,
+    cursor: CursorHider,
     frame_stats: FrameStats,
     last_frame: Instant,
 }
@@ -142,6 +144,7 @@ impl Session {
             locked: false,
             awake: Awake::default(),
             fade: SilenceFade::default(),
+            cursor: CursorHider::default(),
             frame_stats: FrameStats::default(),
             last_frame: Instant::now(),
             displays: vec![main],
@@ -263,6 +266,8 @@ impl Session {
         let window = event_loop
             .create_window(attrs)
             .context("creating a window for another monitor")?;
+        // Match the other windows if the cursor is hidden right now.
+        window.set_cursor_visible(self.cursor.visible());
         self.gpu.add_display(Arc::new(window))
     }
 
@@ -279,6 +284,21 @@ impl Session {
         self.window().set_fullscreen(None);
         let size = self.displays[0].size();
         self.resize_canvas(size);
+    }
+
+    pub fn cursor_moved(&mut self) {
+        self.cursor.moved();
+    }
+
+    /// Hides the cursor over our windows once it's been still in full screen
+    /// or span mode (see [`CursorHider`]).
+    fn update_cursor(&mut self, dt: f32) {
+        let immersive = self.spanning || self.window().fullscreen().is_some();
+        if let Some(visible) = self.cursor.update(dt, immersive, self.show_settings) {
+            for display in &self.displays {
+                display.window.set_cursor_visible(visible);
+            }
+        }
     }
 
     pub fn apply(&mut self, action: Action, event_loop: &ActiveEventLoop) -> Outcome {
@@ -371,6 +391,7 @@ impl Session {
         };
         self.awake.update(self.settings.keep_awake, silent, dt);
         self.fade.update(self.settings.fade_on_silence, silent, dt);
+        self.update_cursor(dt);
         if self.settings.random_mode
             && !self.locked
             && self.auto_switch.tick(

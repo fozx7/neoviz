@@ -2,6 +2,7 @@
 //! [`Session`].
 
 mod awake;
+mod cursor;
 mod fade;
 pub mod frame_stats;
 mod icon;
@@ -176,6 +177,10 @@ impl ApplicationHandler for App {
                             || matches!(a, Action::ToggleSettings | Action::Escape)
                     })
                     .map(|a| fullscreen_or_span(a, session.is_spanning(), &mut self.f_taps))
+            }
+            WindowEvent::CursorMoved { .. } => {
+                session.cursor_moved();
+                None
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
