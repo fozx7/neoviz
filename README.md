@@ -10,14 +10,14 @@ Download the latest package from the repo's **Releases** page. There are x86-64 
 
 **Windows:** unzip anywhere and run `neoviz.exe`.
 
-**Linux:** unpack and run the installer. It puts `neoviz` in `~/.local/bin` and adds neoViz to your app menu (no root needed):
+**Linux:** unpack and run the installer. It puts `neoviz` in `~/.local/bin`, adds neoViz to your app menu, and (if `~/.local/bin` isn't already on your `PATH`) adds it to your shell's startup file so `neoviz` runs from a terminal. No root needed:
 
 ```sh
 tar xzf neoviz-*-linux-x86_64.tar.gz
 cd neoviz-*-linux-x86_64 && ./install.sh
 ```
 
-`./install.sh --uninstall` removes it again (your settings are kept). Needs PulseAudio or PipeWire, and OpenGL/EGL, which any desktop has.
+Open a new terminal afterwards to run `neoviz` by name. `./install.sh --no-path` skips the `PATH` change; `./install.sh --uninstall` removes everything again, including that line (your settings are kept). Needs PulseAudio or PipeWire, and OpenGL/EGL, which any desktop has.
 
 Start playing music and neoViz reacts straight away; there's nothing to set up. Press `Tab` for settings.
 
