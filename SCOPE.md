@@ -1,6 +1,6 @@
 # neoViz: Scope Document
 
-> **Status (2026-11-14):** **v0.9.0** is released. Every v1 milestone is now done, including MilkDrop on Windows, which runs on real hardware. What's left before 1.0 is in §15: the app icon, a final Windows check, and the release itself. Where the build differs from the original plan, the relevant section says so under **As built**.
+> **Status (2026-11-15):** **v1.0.0** is released: every v1 goal is met on Windows and Linux, with MilkDrop on both, the app icon, and x86-64 and ARM64 packages. §15 records what changed since v0.9.0 and what's still untested. Where the build differs from the original plan, the relevant section says so under **As built**.
 
 ## 1. Summary
 
@@ -250,19 +250,14 @@ neoviz/
 - Prefer GPU shaders for all visual work, and keep visualizer code small and self-contained so adding a new one is a single file plus a shader.
 - Keep dependencies modest. Ask before pulling in a large framework (game engine, Electron, etc.).
 
-## 15. Remaining for 1.0
+## 15. Release 1.0.0
 
-Done since v0.9.0: MilkDrop on Windows (patched `projectm-sys`, WGL pbuffer, GLEW), ARM64 builds, the log file, preloading with crossfades, the silence fade, `Space` locking MilkDrop's timer, 6 dB sensitivity steps, the detailed FPS counter, and icon plumbing.
+Done since v0.9.0: MilkDrop on Windows (patched `projectm-sys`, WGL pbuffer, GLEW), ARM64 builds, the log file, preloading with crossfades, the silence fade, `Space` locking MilkDrop's timer, 6 dB sensitivity steps, the detailed FPS counter, the hand-drawn app icon on every OS, and a Linux installer that puts `neoviz` on `PATH` and refreshes KDE's icons.
 
-1. **App icon:** waiting on the final artwork. Then run `packaging/make-icons.sh` and check it on Windows (title bar, taskbar, `.exe` in Explorer) and on Linux after `install.sh` (Wayland takes it from the installed desktop entry).
-2. **Windows check on the laptop**, once Windows Update has settled:
-   - full-screen smoothness with the detailed FPS counter (late frames should be about zero)
-   - unplugging headphones / changing the default device
-   - sleep/wake, keep-awake, fade on silence
-   - a second monitor and span mode, if one's handy
-3. **Merge `milkdrop-windows` into `main`.** Opening the PR also runs CI's Windows lint and tests, which haven't run on this branch (only release builds have).
-4. **Release 1.0.0:** bump `version` in `Cargo.toml`, tag `v1.0.0`, and let the release workflow publish it.
+Verified on hardware: Linux (KDE Plasma, Wayland) and a Windows 11 x86-64 laptop, including MilkDrop and the icon on both.
 
-**Licensing (settled):** neoViz is MIT. The packages link projectM (LGPL-2.1) and, on Windows, GLEW statically; they ship `THIRD-PARTY-NOTICES.md` and the LGPL text, and the full source (with `vendor/`) satisfies the LGPL's relinking requirement once the repo is public.
+**Licensing:** neoViz is MIT. The packages link projectM (LGPL-2.1) and, on Windows, GLEW statically; they ship `THIRD-PARTY-NOTICES.md` and the LGPL text, and the full source (with `vendor/`) satisfies the LGPL's relinking requirement once the repo is public.
 
-**Not tested on hardware:** the Linux ARM64 package builds in CI but hasn't been run (no device). Windows ARM64 will be tested on a Windows ARM device.
+**Still untested on hardware:** the Linux ARM64 package (no device) and Windows ARM64 (to be tried on a Windows ARM device). Not yet exercised on Windows: sleep/wake, device changes and span mode.
+
+Next steps are the stretch goals in §10, macOS first.
