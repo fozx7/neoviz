@@ -17,10 +17,12 @@ const DUST_LIT: vec3f = vec3f(0.9, 0.38, 0.22);
 const BASS_LIGHT: vec3f = vec3f(1.0, 0.62, 0.3);
 const MID_LIGHT: vec3f = vec3f(1.0, 0.82, 0.62);
 const TREBLE_LIGHT: vec3f = vec3f(1.0, 0.62, 0.82);
-// Samples taken towards the lights for the rays through the dust.
-const RAY_STEPS: i32 = 14;
-const RAY_REACH: f32 = 0.6;   // how far towards the lights the rays look
-const RAY_DECAY: f32 = 0.92;
+// God rays: how bright the beams are, how far out from a light its dust is
+// checked for gaps (in steps of RAY_PROBE), and how quickly beams fade.
+const RAY_STRENGTH: f32 = 1.4;
+const RAY_PROBES: i32 = 4;
+const RAY_PROBE: f32 = 0.06;
+const RAY_FADE: f32 = 2.2;
 
 // Where the band of dust runs: its centre line wanders a little.
 fn dust_band(q: vec2f) -> f32 {
@@ -46,10 +48,17 @@ fn dust(q: vec2f, t: f32) -> f32 {
     return clamp(core + strays, 0.0, 1.0);
 }
 
-// A cheaper dust estimate for the rays (they sample it many times).
+// Three octaves of noise: cheaper than `smooth_fbm`, for the god rays,
+// which sample the dust many times per pixel.
+fn rough_fbm(q: vec2f) -> f32 {
+    return 0.5 * smooth_noise(q) + 0.25 * smooth_noise(q * 2.03 + vec2f(1.7, 9.2))
+        + 0.125 * smooth_noise(q * 4.1 + vec2f(5.3, 2.1)) + 0.0625;
+}
+
+// A cheaper dust estimate for the rays, close to `dust`'s shape.
 fn dust_lite(q: vec2f, t: f32) -> f32 {
     let b = dust_band(q);
-    return b * smoothstep(0.3, 0.62, smooth_fbm(q * 2.6 + vec2f(0.1 * t, 0.0)) + 0.22 * b);
+    return b * smoothstep(0.3, 0.62, rough_fbm(q * 2.6 + vec2f(0.1 * t, 0.0)) + 0.22 * b);
 }
 
 struct Light {
@@ -89,6 +98,34 @@ fn glow(q: vec2f, ls: array<Light, 3>) -> vec3f {
         let d = length(q - ls[i].pos);
         let shape = 3.0 * exp(-d * d * 22.0) + 0.5 * exp(-d * 4.5);
         sum += ls[i].colour * shape * ls[i].power;
+    }
+    return sum;
+}
+
+// God rays: beams of light radiating from each source. Each beam is as
+// bright as the dust near the light is open in its direction, so light
+// streams out through the gaps and is held back where the dust is thick.
+// Fine streaks (noise around the light) split the beams into rays.
+fn god_rays(q: vec2f, t: f32, ls: array<Light, 3>) -> vec3f {
+    var sum = vec3f(0.0);
+    for (var l = 0; l < 3; l++) {
+        let v = q - ls[l].pos;
+        let d = max(length(v), 1e-4);
+        let dir = v / d;
+        // How open the dust is going out from the light this way.
+        var open = 0.0;
+        for (var k = 1; k <= RAY_PROBES; k++) {
+            let probe = ls[l].pos + dir * RAY_PROBE * f32(k);
+            open += exp(-dust_lite(probe, t) * 5.0);
+        }
+        open /= f32(RAY_PROBES);
+        // Streaks, from noise sampled around a circle (so there's no seam),
+        // turning slowly.
+        let spin = vec2f(0.15 * t, -0.1 * t) + f32(l) * 7.0;
+        let streaks = 0.6 * smooth_noise(dir * 6.0 + spin) + 0.4 * smooth_noise(dir * 17.0 - spin);
+        let beam = pow(streaks, 2.5) * 3.0 * open * open;
+        let fade = exp(-d * RAY_FADE) * smoothstep(0.0, 0.1, d);
+        sum += ls[l].colour * ls[l].power * beam * fade;
     }
     return sum;
 }
@@ -139,32 +176,15 @@ fn fs(in: FullscreenOut) -> @location(0) vec4f {
     col += HAZE * 0.05 * dot(light_here, vec3f(0.33)) * (1.0 + p.extra.z);
     col += whiten(light_here) * through;
 
-    // Rays: walk towards the lights' centre, adding up light that got past
-    // the dust along the way.
-    var centre = vec2f(0.0);
-    var total = 0.0;
-    for (var i = 0; i < 3; i++) {
-        centre += ls[i].pos * ls[i].power;
-        total += ls[i].power;
-    }
-    centre /= max(total, 1e-3);
-    let step = (centre - q) * RAY_REACH / f32(RAY_STEPS);
-    var ray_q = q;
-    var weight = 1.0;
-    var rays = vec3f(0.0);
-    for (var i = 0; i < RAY_STEPS; i++) {
-        ray_q += step;
-        let open = exp(-dust_lite(ray_q, t) * 4.0);
-        rays += glow(ray_q, ls) * open * weight;
-        weight *= RAY_DECAY;
-    }
-    col += rays * (0.06 + 0.04 * p.flash) * (1.0 - 0.5 * thickness);
-
     // The dust itself: dark, but its thin edges glow with the light behind.
     let edge = thickness * (1.0 - thickness) * 4.0;
     let backlight = dot(light_here, vec3f(0.33));
     let dust_colour = DUST_DARK + DUST_LIT * edge * backlight * 0.6;
     col = mix(col, dust_colour, smoothstep(0.0, 0.6, thickness) * 0.95);
+
+    // God rays, lit in the gas in front of the dust.
+    let rays = god_rays(q, t, ls);
+    col += rays * RAY_STRENGTH * (1.0 + 0.6 * p.flash) * (1.0 - 0.6 * thickness);
 
     let vignette = 1.0 - 0.4 * dot(in.uv - 0.5, in.uv - 0.5) * 2.0;
     return vec4f(col * vignette, 1.0);
