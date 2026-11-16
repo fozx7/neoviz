@@ -16,6 +16,7 @@ use winit::{
 };
 
 use super::{
+    capture::FrameCapture,
     awake::Awake,
     cursor::CursorHider,
     fade::SilenceFade,
@@ -101,6 +102,8 @@ pub struct Session {
     frame_stats: FrameStats,
     /// The loudest frequency, for the debug readouts.
     loudest: Readout,
+    /// Saves a frame and quits, when asked to by the environment (dev aid).
+    frame_capture: Option<FrameCapture>,
     last_frame: Instant,
 }
 
@@ -151,6 +154,7 @@ impl Session {
             cursor: CursorHider::default(),
             frame_stats: FrameStats::default(),
             loudest: Readout::default(),
+            frame_capture: FrameCapture::from_env(),
             last_frame: Instant::now(),
             displays: vec![main],
             slices: vec![WHOLE],
@@ -455,6 +459,14 @@ impl Session {
             }
         }
         let wait = self.draw(size);
+        if let Some(capture) = &mut self.frame_capture
+            && capture.due(dt)
+        {
+            if let Err(e) = capture.save(self.gpu.device(), self.gpu.queue(), self.canvas.view()) {
+                log::error!("couldn't save the frame: {e:#}");
+            }
+            std::process::exit(0);
+        }
         self.save_if_changed(dt);
         let total = now.elapsed().as_secs_f32();
         self.frame_stats.record(FrameTiming {

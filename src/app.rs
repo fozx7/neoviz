@@ -2,6 +2,7 @@
 //! [`Session`].
 
 mod awake;
+mod capture;
 mod cursor;
 mod fade;
 pub mod frame_stats;
