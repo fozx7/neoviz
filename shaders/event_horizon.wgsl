@@ -37,7 +37,7 @@ const SKY_HIGHLIGHTS: f32 = 2.0;
 const GLOW_NEAR: f32 = 2.5;
 const GLOW_FAR: f32 = 4.0;
 const GLOW_THRESHOLD: f32 = 0.05;
-const GLOW_STRENGTH: f32 = 0.5;
+const GLOW_STRENGTH: f32 = 0.8;
 
 // The backdrop (see ImageTexture): a deep-field photo, mirrored at its edges.
 @group(1) @binding(0) var sky_image: texture_2d<f32>;
