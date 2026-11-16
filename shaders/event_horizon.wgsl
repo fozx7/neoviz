@@ -1,7 +1,7 @@
 // Event Horizon: a black hole seen from just above its accretion disk. Each
 // pixel's light ray is bent around the hole, so the far side of the disk
 // shows wrapped over and under the shadow, the galaxies behind it (a real
-// Webb deep field) are lensed into arcs around it, and a thin photon ring
+// sky survey photo) are lensed into arcs around it, and a thin photon ring
 // outlines the shadow.
 //
 // Units: the event horizon has radius 1. The disk's rings follow the
@@ -18,10 +18,13 @@ const FOV: f32 = 0.42;        // half the view's height at unit distance
 const MAX_STEPS: i32 = 240;
 const ESCAPE_R: f32 = 40.0;
 const PHOTON_SPHERE: f32 = 1.5;
-// The backdrop photo: how much of it spans one radian of sky (so how big it
-// looks), how bright it's shown, and how far its centre wanders.
+// The backdrop photo: how much of its height spans one radian of sky (so how
+// big it looks), how bright it's shown, the level that becomes black (so the
+// photo's grey sky goes dark), the contrast, and how far its centre wanders.
 const SKY_SCALE: f32 = 0.55;
-const SKY_EXPOSURE: f32 = 0.9;
+const SKY_EXPOSURE: f32 = 0.85;
+const SKY_BLACK: f32 = 0.025;
+const SKY_CONTRAST: f32 = 1.25;
 const SKY_PAN: f32 = 0.06;
 
 // The backdrop (see ImageTexture): a deep-field photo, mirrored at its edges.
@@ -95,12 +98,17 @@ fn sky(d: vec3f, right: vec3f, up: vec3f, forward: vec3f, blur: f32) -> vec3f {
     let local = vec3f(dot(d, right), dot(d, up), dot(d, forward));
     let angle = acos(clamp(local.z, -1.0, 1.0));
     let across = normalize(local.xy + vec2f(1e-6, 0.0));
+    let size = vec2f(textureDimensions(sky_image));
     let drift = SKY_PAN * vec2f(sin(p.extra.y * 1.3), cos(p.extra.y * 0.9));
-    let uv = vec2f(0.5) + drift + vec2f(across.x, -across.y) * angle * SKY_SCALE;
+    // Scale x by the photo's shape so it isn't stretched.
+    let spread = vec2f(across.x * size.y / size.x, -across.y) * angle * SKY_SCALE;
+    let uv = vec2f(0.5) + drift + spread;
     // About one photo pixel per screen pixel when unlensed.
-    let texels = f32(textureDimensions(sky_image).y) * SKY_SCALE * 2.0 * FOV / p.resolution.y;
+    let texels = size.y * SKY_SCALE * 2.0 * FOV / p.resolution.y;
     let lod = max(log2(texels), 0.0) + blur;
-    let photo = textureSampleLevel(sky_image, sky_sampler, uv, lod).rgb;
+    let raw = textureSampleLevel(sky_image, sky_sampler, uv, lod).rgb;
+    // Deepen the blacks and add contrast, so the photo sits back behind the disk.
+    let photo = pow(max(raw - SKY_BLACK, vec3f(0.0)) / (1.0 - SKY_BLACK), vec3f(SKY_CONTRAST));
     return photo * SKY_EXPOSURE * (1.0 + 0.15 * p.treble + 0.2 * p.flash);
 }
 

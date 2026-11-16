@@ -1,5 +1,5 @@
 //! A picture (JPEG) as a mipmapped texture, for visualizers that draw one,
-//! e.g. a real space image behind Event Horizon.
+//! e.g. a real sky survey image behind Event Horizon.
 
 use anyhow::Context;
 use zune_jpeg::{
@@ -170,9 +170,9 @@ mod tests {
 
     #[test]
     fn the_bundled_sky_decodes() {
-        let jpeg = include_bytes!("../../assets/sky/webb-first-deep-field.jpg");
+        let jpeg = include_bytes!("../../assets/sky/cosmos-ultravista.jpg");
         let (w, h, px) = decode_rgba(jpeg).unwrap();
-        assert_eq!((w, h), (3011, 3072));
+        assert_eq!((w, h), (4096, 2590));
         assert_eq!(px.len(), (w * h) as usize * CHANNELS);
     }
 }

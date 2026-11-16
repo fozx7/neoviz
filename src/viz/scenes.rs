@@ -24,10 +24,12 @@ pub enum Scene {
     DeepNebula,
 }
 
-/// Webb's First Deep Field (galaxy cluster SMACS 0723), behind Event Horizon.
-const DEEP_FIELD: &[u8] = include_bytes!("../../assets/sky/webb-first-deep-field.jpg");
+/// The full COSMOS field from ESO's VISTA telescope (UltraVISTA), behind
+/// Event Horizon: thousands of faint, distant galaxies.
+const DEEP_FIELD: &[u8] = include_bytes!("../../assets/sky/cosmos-ultravista.jpg");
 /// Its credit line, which must be shown with it (CC BY 4.0).
-const DEEP_FIELD_CREDIT: &str = "Background: NASA, ESA, CSA, and STScI (Webb's First Deep Field)";
+const DEEP_FIELD_CREDIT: &str =
+    "Background: ESO/UltraVISTA team. Acknowledgement: TERAPIX/CNRS/INSU/CASU";
 
 impl Scene {
     pub const ALL: [Self; 4] = [
