@@ -16,8 +16,8 @@ use winit::{
 };
 
 use super::{
-    capture::FrameCapture,
     awake::Awake,
+    capture::FrameCapture,
     cursor::CursorHider,
     fade::SilenceFade,
     frame_stats::{FrameStats, FrameTiming},

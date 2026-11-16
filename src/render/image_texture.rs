@@ -26,7 +26,8 @@ impl ImageTexture {
         label: &str,
         jpeg: &[u8],
     ) -> anyhow::Result<Self> {
-        let (width, height, pixels) = decode_rgba(jpeg).with_context(|| format!("decoding {label}"))?;
+        let (width, height, pixels) =
+            decode_rgba(jpeg).with_context(|| format!("decoding {label}"))?;
         let levels = mip_chain(width, height, pixels);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(label),
@@ -124,7 +125,9 @@ fn mip_chain(width: u32, height: u32, pixels: Vec<u8>) -> Vec<(u32, u32, Vec<u8>
 fn half_size(width: u32, height: u32, pixels: &[u8]) -> (u32, u32, Vec<u8>) {
     let (w, h) = (width as usize, height as usize);
     let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
-    let at = |x: usize, y: usize, c: usize| u32::from(pixels[(y.min(h - 1) * w + x.min(w - 1)) * CHANNELS + c]);
+    let at = |x: usize, y: usize, c: usize| {
+        u32::from(pixels[(y.min(h - 1) * w + x.min(w - 1)) * CHANNELS + c])
+    };
     let mut out = Vec::with_capacity(nw * nh * CHANNELS);
     for y in 0..nh {
         for x in 0..nw {
