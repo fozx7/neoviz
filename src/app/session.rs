@@ -578,6 +578,10 @@ impl Session {
                 .collect(),
             keeping_awake: self.awake.is_holding(),
         };
+        let credit = (!self.show_debug)
+            .then(|| self.visualizers[self.switcher.current()].credit())
+            .flatten()
+            .map(str::to_owned);
         let hud = Hud {
             toast: self.toast.as_ref(),
             fps: self.settings.show_fps.then(|| FpsHud {
@@ -597,6 +601,7 @@ impl Session {
                 loudest: self.loudest.shown(),
             }),
             capture_error: capture_error.as_deref(),
+            credit: credit.as_deref(),
         };
         let mut requests = Default::default();
         let mut open = self.show_settings;

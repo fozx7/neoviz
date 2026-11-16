@@ -325,6 +325,8 @@ pub struct Hud<'a> {
     pub fps: Option<FpsHud>,
     /// Labels for the analysis debug view, while it's showing.
     pub debug: Option<DebugLabels>,
+    /// A credit line the visualizer on screen needs shown (e.g. for a photo).
+    pub credit: Option<&'a str>,
     pub capture_error: Option<&'a str>,
 }
 
@@ -343,6 +345,11 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
             Color32::WHITE,
             toast.alpha(),
         );
+    }
+    if let Some(credit) = hud.credit {
+        let pos = Pos2::new(screen.left() + 10.0, screen.bottom() - 8.0);
+        let colour = Color32::from_gray(190);
+        shadowed_text(&painter, pos, Align2::LEFT_BOTTOM, credit, 12.0, colour, 0.75);
     }
     if let Some(labels) = &hud.debug {
         debug_hud::draw(&painter, screen, labels);

@@ -56,6 +56,12 @@ pub trait Visualizer {
         None
     }
 
+    /// A credit line to show on screen while it's showing (e.g. for a
+    /// photo it uses whose licence requires one).
+    fn credit(&self) -> Option<&str> {
+        None
+    }
+
     /// A status line for the settings panel, if there's something to say.
     fn status(&self) -> Option<String> {
         None
@@ -82,8 +88,7 @@ pub struct Lineup {
 
 /// Every built-in visualizer, in rotation order: the main ones first,
 /// then the alternate variants.
-pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Lineup {
-    #[allow(unused_mut)] // only pushed to when MilkDrop is built in
+pub fn create_all(device: &wgpu::Device, queue: &wgpu::Queue, size: (u32, u32)) -> Lineup {
     let mut failures = Vec::new();
     use bars::{Bars, BarsVariant};
     use layered::{Kind, Layered};
@@ -96,11 +101,16 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Lineup {
         Box::new(particles::Particles::new(device, size)),
         Box::new(lightshow::Lightshow::new(device, size)),
         Box::new(starfield::Starfield::new(device, size)),
-        Box::new(scenes::SceneViz::new(device, scenes::Scene::EventHorizon)),
-        Box::new(scenes::SceneViz::new(device, scenes::Scene::OilOnIce)),
-        Box::new(scenes::SceneViz::new(device, scenes::Scene::BurningWorld)),
-        Box::new(scenes::SceneViz::new(device, scenes::Scene::DeepNebula)),
     ];
+    for scene in scenes::Scene::ALL {
+        match scenes::SceneViz::new(device, queue, scene) {
+            Ok(v) => all.push(Box::new(v)),
+            Err(e) => {
+                log::error!("{} unavailable: {e:#}", scene.name());
+                failures.push((scene.name().to_owned(), format!("couldn't start: {e:#}")));
+            }
+        }
+    }
     #[cfg(milkdrop)]
     match milkdrop::MilkDrop::new(device, size) {
         Ok(m) => all.push(Box::new(m)),

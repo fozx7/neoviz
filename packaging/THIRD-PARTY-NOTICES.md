@@ -13,6 +13,14 @@ MilkDrop support uses [projectM](https://github.com/projectM-visualizer/projectm
 
 The Windows build of projectM uses [GLEW](https://github.com/nigels-com/glew), linked statically. GLEW is available under the Modified BSD License, the Mesa 3-D License (MIT) and the Khronos License (MIT); see https://github.com/nigels-com/glew/blob/master/LICENSE.txt.
 
+## Webb's First Deep Field (Event Horizon's background)
+
+The Event Horizon visualizer draws a resized copy of *Webb's First Deep Field* (galaxy cluster SMACS 0723) behind its black hole, warped by the simulated gravitational lensing.
+
+- Credit: **NASA, ESA, CSA, and STScI**. The credit is shown on screen while Event Horizon is showing.
+- Source: https://esawebb.org/images/weic2209a/
+- Licence: [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/), per https://esawebb.org/copyright/. The copy in `assets/sky/` is resized to 3011×3072.
+
 ## Rust crates
 
 The Rust libraries neoViz is built from are under permissive licences (mostly MIT and/or Apache-2.0). `cargo tree` in the source lists them.

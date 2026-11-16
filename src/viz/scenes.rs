@@ -5,7 +5,10 @@
 
 use crate::{
     audio::{analysis::AudioFrame, bands::smoothing_coef},
-    render::layer::{Blend, LayerParams, ShaderLayer},
+    render::{
+        image_texture::ImageTexture,
+        layer::{Blend, LayerParams, ShaderLayer},
+    },
 };
 
 use super::{
@@ -21,8 +24,20 @@ pub enum Scene {
     DeepNebula,
 }
 
+/// Webb's First Deep Field (galaxy cluster SMACS 0723), behind Event Horizon.
+const DEEP_FIELD: &[u8] = include_bytes!("../../assets/sky/webb-first-deep-field.jpg");
+/// Its credit line, which must be shown with it (CC BY 4.0).
+const DEEP_FIELD_CREDIT: &str = "Background: NASA, ESA, CSA, and STScI (Webb's First Deep Field)";
+
 impl Scene {
-    fn name(self) -> &'static str {
+    pub const ALL: [Self; 4] = [
+        Self::EventHorizon,
+        Self::OilOnIce,
+        Self::BurningWorld,
+        Self::DeepNebula,
+    ];
+
+    pub fn name(self) -> &'static str {
         match self {
             Self::EventHorizon => "Event Horizon",
             Self::OilOnIce => "Oil on Ice",
@@ -38,6 +53,19 @@ impl Scene {
             Self::BurningWorld => include_str!("../../shaders/burning_world.wgsl"),
             Self::DeepNebula => include_str!("../../shaders/deep_nebula.wgsl"),
         }
+    }
+
+    /// A picture the shader samples, if it uses one.
+    fn image(self) -> Option<&'static [u8]> {
+        match self {
+            Self::EventHorizon => Some(DEEP_FIELD),
+            _ => None,
+        }
+    }
+
+    /// The credit line that must be shown with the scene's picture.
+    fn credit(self) -> Option<&'static str> {
+        self.image().map(|_| DEEP_FIELD_CREDIT)
     }
 
     /// How long a beat's pulse takes to fade.
@@ -80,10 +108,18 @@ pub struct SceneViz {
 }
 
 impl SceneViz {
-    pub fn new(device: &wgpu::Device, scene: Scene) -> Self {
-        Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, scene: Scene) -> anyhow::Result<Self> {
+        let (name, shader) = (scene.name(), scene.shader());
+        let layer = match scene.image() {
+            Some(jpeg) => {
+                let image = ImageTexture::from_jpeg(device, queue, name, jpeg)?;
+                ShaderLayer::with_image(device, name, shader, Blend::Replace, image)
+            }
+            None => ShaderLayer::new(device, name, shader, Blend::Replace),
+        };
+        Ok(Self {
             scene,
-            layer: ShaderLayer::new(device, scene.name(), scene.shader(), Blend::Replace),
+            layer,
             params: LayerParams::default(),
             bands: Vec::new(),
             time: 0.0,
@@ -91,13 +127,17 @@ impl SceneViz {
             slow: 0.0,
             swell: 0.0,
             flash: BeatFlash::new(scene.flash_decay_secs()),
-        }
+        })
     }
 }
 
 impl Visualizer for SceneViz {
     fn name(&self) -> &str {
         self.scene.name()
+    }
+
+    fn credit(&self) -> Option<&str> {
+        self.scene.credit()
     }
 
     fn update(&mut self, audio: &AudioFrame, dt: f32) {

@@ -1,7 +1,8 @@
 // Event Horizon: a black hole seen from just above its accretion disk. Each
 // pixel's light ray is bent around the hole, so the far side of the disk
-// shows wrapped over and under the shadow, stars are lensed around it, and a
-// thin photon ring outlines the shadow.
+// shows wrapped over and under the shadow, the galaxies behind it (a real
+// Webb deep field) are lensed into arcs around it, and a thin photon ring
+// outlines the shadow.
 //
 // Units: the event horizon has radius 1. The disk's rings follow the
 // spectrum (bass outside, treble inside), it spins faster with the mids, and
@@ -17,15 +18,20 @@ const FOV: f32 = 0.42;        // half the view's height at unit distance
 const MAX_STEPS: i32 = 240;
 const ESCAPE_R: f32 = 40.0;
 const PHOTON_SPHERE: f32 = 1.5;
+// The backdrop photo: how much of it spans one radian of sky (so how big it
+// looks), how bright it's shown, and how far its centre wanders.
+const SKY_SCALE: f32 = 0.55;
+const SKY_EXPOSURE: f32 = 0.9;
+const SKY_PAN: f32 = 0.06;
+
+// The backdrop (see ImageTexture): a deep-field photo, mirrored at its edges.
+@group(1) @binding(0) var sky_image: texture_2d<f32>;
+@group(1) @binding(1) var sky_sampler: sampler;
 
 fn rot2(a: f32) -> mat2x2f {
     let c = cos(a);
     let s = sin(a);
     return mat2x2f(c, s, -s, c);
-}
-
-fn hash31(q: vec3f) -> f32 {
-    return fract(sin(dot(q, vec3f(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
 // Disk colour by temperature: deep orange at the rim to white-hot inside.
@@ -80,25 +86,22 @@ fn disk(hit: vec3f, ray: vec3f) -> vec4f {
     return vec4f(colour * glow * edge, alpha);
 }
 
-// The sky in direction `d`: faint haze and two sizes of star.
-fn sky(d: vec3f) -> vec3f {
-    let haze = fbm(d.xy * 2.5 + vec2f(d.z * 1.7, -d.z));
-    var col = vec3f(0.012, 0.01, 0.022) * haze * haze;
-    for (var layer = 0; layer < 2; layer++) {
-        let scale = select(300.0, 650.0, layer == 1);
-        let s = d * scale;
-        let cell = floor(s);
-        let h = hash31(cell);
-        if (h > 0.992) {
-            let jitter = vec3f(hash31(cell + 1.3), hash31(cell + 2.7), hash31(cell + 4.1));
-            let dist = length(s - cell - 0.2 - 0.6 * jitter);
-            let twinkle = 1.0 + (0.3 + 0.7 * p.treble) * 0.4
-                * sin(p.time * (2.0 + 5.0 * hash31(cell + 9.1)) + h * 60.0);
-            let tint = mix(vec3f(0.7, 0.8, 1.0), vec3f(1.0, 0.85, 0.7), hash31(cell + 5.5));
-            col += tint * smoothstep(0.45, 0.0, dist) * (h - 0.992) / 0.008 * twinkle * 1.6;
-        }
-    }
-    return col;
+// The sky in direction `d` (world space), seen by a camera with axes
+// `right`, `up` and `forward`. The photo is laid around the view direction
+// by angle (an azimuthal projection), which stays smooth even for light the
+// hole bends round from behind the camera. `blur` adds mip levels where the
+// lensing squeezes the photo, so it doesn't shimmer.
+fn sky(d: vec3f, right: vec3f, up: vec3f, forward: vec3f, blur: f32) -> vec3f {
+    let local = vec3f(dot(d, right), dot(d, up), dot(d, forward));
+    let angle = acos(clamp(local.z, -1.0, 1.0));
+    let across = normalize(local.xy + vec2f(1e-6, 0.0));
+    let drift = SKY_PAN * vec2f(sin(p.extra.y * 1.3), cos(p.extra.y * 0.9));
+    let uv = vec2f(0.5) + drift + vec2f(across.x, -across.y) * angle * SKY_SCALE;
+    // About one photo pixel per screen pixel when unlensed.
+    let texels = f32(textureDimensions(sky_image).y) * SKY_SCALE * 2.0 * FOV / p.resolution.y;
+    let lod = max(log2(texels), 0.0) + blur;
+    let photo = textureSampleLevel(sky_image, sky_sampler, uv, lod).rgb;
+    return photo * SKY_EXPOSURE * (1.0 + 0.15 * p.treble + 0.2 * p.flash);
 }
 
 @fragment
@@ -148,7 +151,9 @@ fn fs(in: FullscreenOut) -> @location(0) vec4f {
     }
 
     if (!captured) {
-        col += (1.0 - alpha) * sky(normalize(vel));
+        // Rays that passed close to the photon sphere are squeezed hard.
+        let squeeze = 3.0 * exp(-(closest - PHOTON_SPHERE) * 1.5);
+        col += (1.0 - alpha) * sky(normalize(vel), right, up, forward, squeeze);
     }
     // Light that skimmed the photon sphere: the thin bright ring.
     let ring = exp(-pow((closest - PHOTON_SPHERE) * 9.0, 2.0));

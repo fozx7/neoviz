@@ -2,8 +2,9 @@
 //! data (see `shaders/layer_header.wgsl`). Most visualizers are one of these,
 //! optionally drawn over a feedback buffer.
 
-use super::common::{
-    DataTexture, HDR_FORMAT, Uniforms, draw_fullscreen, entry, fullscreen_pipeline,
+use super::{
+    common::{DataTexture, HDR_FORMAT, Uniforms, draw_fullscreen, entry, fullscreen_pipeline},
+    image_texture::ImageTexture,
 };
 
 const HEADER: &str = include_str!("../../shaders/layer_header.wgsl");
@@ -90,21 +91,48 @@ pub struct ShaderLayer {
     bind_group: wgpu::BindGroup,
     params: Uniforms<PARAM_FLOATS>,
     data: DataTexture,
+    /// A picture the shader can sample, as `@group(1)`.
+    image: Option<ImageTexture>,
 }
 
 impl ShaderLayer {
     /// `source` must define `fn fs(in: FullscreenOut) -> @location(0) vec4f`
     /// and may use everything in the layer header.
     pub fn new(device: &wgpu::Device, label: &'static str, source: &str, blend: Blend) -> Self {
+        Self::build(device, label, source, blend, None)
+    }
+
+    /// Like [`ShaderLayer::new`], with `image` for the shader to sample as
+    /// `@group(1) @binding(0)` (a `texture_2d<f32>`) and `@binding(1)` (its
+    /// sampler).
+    pub fn with_image(
+        device: &wgpu::Device,
+        label: &'static str,
+        source: &str,
+        blend: Blend,
+        image: ImageTexture,
+    ) -> Self {
+        Self::build(device, label, source, blend, Some(image))
+    }
+
+    fn build(
+        device: &wgpu::Device,
+        label: &'static str,
+        source: &str,
+        blend: Blend,
+        image: Option<ImageTexture>,
+    ) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some(label),
             entries: &[entry::uniform(0), entry::texture(1, false)],
         });
+        let mut layouts = vec![&layout];
+        layouts.extend(image.as_ref().map(|i| &i.layout));
         let pipeline = fullscreen_pipeline(
             device,
             label,
             &format!("{HEADER}\n{source}"),
-            &[&layout],
+            &layouts,
             HDR_FORMAT,
             blend.state(),
         );
@@ -131,6 +159,7 @@ impl ShaderLayer {
             bind_group,
             params,
             data,
+            image,
         }
     }
 
@@ -144,14 +173,9 @@ impl ShaderLayer {
     /// Draws into `target`. [`Blend::Replace`] layers clear it first.
     pub fn draw(&self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let clear = self.blend == Blend::Replace;
-        draw_fullscreen(
-            encoder,
-            self.label,
-            target,
-            clear,
-            &self.pipeline,
-            &[&self.bind_group],
-        );
+        let mut groups = vec![&self.bind_group];
+        groups.extend(self.image.as_ref().map(|i| &i.bind_group));
+        draw_fullscreen(encoder, self.label, target, clear, &self.pipeline, &groups);
     }
 }
 
