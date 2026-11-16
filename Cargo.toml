@@ -1,6 +1,6 @@
 [package]
 name = "neoviz"
-version = "1.0.1"
+version = "1.1.1"
 edition = "2024"
 description = "Retro-style system-audio visualizer for Windows and Linux"
 license = "MIT"
@@ -24,6 +24,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "1.2.1"
 wgpu = "30"
 winit = "0.30"
+zune-jpeg = "0.5.15"
 
 [profile.release]
 strip = true

@@ -99,6 +99,11 @@ impl Bands {
         self.values.len()
     }
 
+    /// The `len() + 1` band edges in Hz, ascending.
+    pub fn edges(&self) -> &[f32] {
+        &self.edges
+    }
+
     /// Smoothed levels, 0..1, lowest band first.
     pub fn values(&self) -> &[f32] {
         &self.values

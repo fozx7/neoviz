@@ -6,7 +6,17 @@ use crate::audio::{
 };
 
 /// Bottom of the spectrum display in dBFS.
-const DISPLAY_DB_MIN: f32 = -90.0;
+pub const DISPLAY_DB_MIN: f32 = -90.0;
+/// The spectrum's log axis starts here and runs to Nyquist.
+pub const SPECTRUM_MIN_HZ: f32 = 20.0;
+/// Layout, shared with the labels drawn over it: fractions of the height at
+/// which the waveform and spectrum panels end, and of the bands panel's
+/// width given to the bars (the rest is the four meters).
+pub const WAVE_END: f32 = 0.25;
+pub const SPEC_END: f32 = 0.55;
+pub const BARS_WIDTH: f32 = 0.84;
+/// Height of the strip under the bars kept clear for their labels, in points.
+pub const LABEL_STRIP_POINTS: f32 = 34.0;
 /// How quickly the beat flash fades.
 const FLASH_DECAY_SECS: f32 = 0.12;
 // Rows of the data texture; must match the shader.
@@ -18,7 +28,7 @@ const LEVELS_ROW: u32 = 4;
 const DATA_ROWS: u32 = 5;
 const DATA_WIDTH: u32 = SPECTRUM_BINS as u32;
 /// Uniform size in floats (a multiple of 4 for 16-byte alignment).
-const PARAMS_FLOATS: usize = 12;
+const PARAMS_FLOATS: usize = 16;
 
 pub struct DebugView {
     pipeline: wgpu::RenderPipeline,
@@ -137,13 +147,15 @@ impl DebugView {
         }
     }
 
-    /// Uploads this frame's analysis and screen size.
+    /// Uploads this frame's analysis and screen size. `scale` is pixels per
+    /// point, for sizing the label strip.
     pub fn update(
         &mut self,
         queue: &wgpu::Queue,
         audio: &AudioFrame,
         sample_rate: u32,
         size: (u32, u32),
+        scale: f32,
         dt: f32,
     ) {
         self.flash *= 1.0 - smoothing_coef(FLASH_DECAY_SECS, dt);
@@ -162,7 +174,11 @@ impl DebugView {
             audio.bands.len() as f32,
             self.flash,
             f32::from(u8::from(audio.silent)),
-            0.0,
+            WAVE_END,
+            SPEC_END,
+            BARS_WIDTH,
+            LABEL_STRIP_POINTS * scale,
+            SPECTRUM_MIN_HZ,
             0.0,
         ];
         to_bytes(&mut self.bytes, params);

@@ -2,7 +2,7 @@
 
 A retro-style music visualizer for Windows and Linux. It listens to whatever your computer is playing (Spotify, a browser, a game) and draws full-screen visuals in the spirit of the mid-2000s media player visualizers. It doesn't play music itself.
 
-It comes with seven built-in visualizers (plus variants) and can also play **MilkDrop** presets, the thousands of community-made visuals from Winamp's classic visualizer.
+It comes with twelve built-in visualizers (plus variants), from classic spectrum bars to a black hole bending the light of real galaxies, and can also play **MilkDrop** presets, the thousands of community-made visuals from Winamp's classic visualizer.
 
 ## Install
 
@@ -61,6 +61,7 @@ You can also pick the device in the settings overlay (`Tab`).
 | Key | Action |
 |---|---|
 | `F` / double-click | Toggle full screen |
+| Drag | Move the window (anywhere in it, with or without its border) |
 | `F` `F` (double-tap) | Span every monitor (one window per monitor, one picture across them); `F` or `Esc` to leave |
 | `←` / `→` | Previous / next visualizer |
 | `Esc` | Leave full screen, or quit when windowed |
@@ -71,13 +72,19 @@ You can also pick the device in the settings overlay (`Tab`).
 | `B` | Toggle bloom |
 | `C` | Toggle CRT scanlines |
 | `[` / `]` | Previous / next MilkDrop preset |
-| `D` | Toggle the analysis debug view |
+| `D` | Toggle the analysis debug view (labelled with the frequency of every bar and the loudest frequency playing) |
 
-Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy Particles, Classic Lightshow, Starfield Warp, then variants: LED Bars, Ring Scope, Mirror Bars, Stereo X/Y.
+Visualizers: Bars & Peaks, Oscilloscope, Ambient Swirl, Battery Rings, Alchemy Particles, Classic Lightshow, Starfield Warp, Event Horizon, Oil on Ice, Burning World, Deep Nebula, Windswept Field, then variants: LED Bars, Ring Scope, Mirror Bars, Stereo X/Y.
+
+- **Event Horizon**: a black hole whose gravity bends light, so its accretion disk wraps over and under the shadow and the real galaxies behind it are lensed into arcs. The background is *The full COSMOS field* (credit: ESO/UltraVISTA team. Acknowledgement: TERAPIX/CNRS/INSU/CASU; [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)), and its credit shows in the corner while it's on screen.
+- **Oil on Ice**: rainbow-sheened oil slicks drifting over dark, cracked ice.
+- **Burning World**: a desert planet seen from orbit as walls of fire sweep across it.
+- **Deep Nebula**: three lights, one each for the bass, mids and treble, slowly circling behind a band of dust and shining through it.
+- **Windswept Field**: gusts rolling through the long grass of a moor under an overcast sky.
 
 **Keep screen on** (overlay → Display): by default neoViz stops the screen blanking or locking while music plays, like a video player, and lets it sleep after a minute of silence. Set it to *Always* or *Off* if you prefer.
 
-**FPS counter** (overlay → Display): shows the frame rate. Tick *Detailed* for performance figures over the last 10 s: 1% and 5% lows (the frame rate across the slowest 1% / 5% of frames), frame times (average, 99th percentile, worst), how much of each frame neoViz spends working versus waiting for the display, how many frames were late (missed a refresh, so the previous picture showed twice), and a graph of recent frame times with late frames in orange. If frames are late while *work* is small, something outside neoViz is holding it up.
+**FPS counter** (overlay → Display): shows the frame rate. Tick *Detailed* for performance figures over the last 10 s: 1% and 5% lows (the frame rate across the slowest 1% / 5% of frames), frame times (average, 99th percentile, worst), how much of each frame neoViz spends working versus waiting for the display, how many frames were late (missed a refresh, so the previous picture showed twice), the audio capture rate and loudest frequency, and a graph of recent frame times with late frames in orange. If frames are late while *work* is small, something outside neoViz is holding it up.
 
 **Fade out when the music stops** (overlay → Display): after a couple of seconds of silence the picture fades to black, and it fades back in as soon as sound returns. Untick it to keep the visuals running in silence.
 
@@ -106,6 +113,8 @@ MilkDrop comes from [libprojectM](https://github.com/projectM-visualizer/project
 
 To install your own build: `cargo build --profile dist`, then `packaging/linux/install.sh`.
 
+To check how a visualizer looks without a screenshot tool, set `NEOVIZ_CAPTURE` to a file name: neoViz saves one frame of its own output there after 6 seconds (or `NEOVIZ_CAPTURE_AFTER` seconds) and quits, e.g. `NEOVIZ_CAPTURE=frame.png cargo run --release -- --visualizer "deep nebula"`.
+
 **Windows:** the Rust toolchain (MSVC) is enough with `--no-default-features`. For MilkDrop you also need Visual Studio 2022 or later (C++ workload), CMake, LLVM (for `libclang`), and [vcpkg](https://vcpkg.io) with `VCPKG_INSTALLATION_ROOT` pointing at it; vcpkg fetches GLEW by itself during the build. The repo carries patched projectM build crates for this (see [vendor/README.md](vendor/README.md)).
 
 ## App icon
@@ -117,7 +126,7 @@ All icon files are generated from one source image: run `packaging/make-icons.sh
 Bump `version` in `Cargo.toml`, commit, then tag and push:
 
 ```sh
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.1.1 && git push origin v1.1.1
 ```
 
 The Release workflow builds optimised Linux and Windows packages (x86-64 and ARM64) and publishes them as a GitHub release.
@@ -126,4 +135,4 @@ The Release workflow builds optimised Linux and Windows packages (x86-64 and ARM
 
 neoViz is MIT-licensed: anyone can take the source and make it their own.
 
-MilkDrop support links [projectM](https://github.com/projectM-visualizer/projectm), which is LGPL-2.1, statically. The LGPL lets you swap in your own projectM: neoViz's full source (including the patched build crates in `vendor/`) is available, and the release packages include the licence text and [third-party notices](packaging/THIRD-PARTY-NOTICES.md).
+MilkDrop support links [projectM](https://github.com/projectM-visualizer/projectm), which is LGPL-2.1, statically. The LGPL lets you swap in your own projectM: neoViz's full source (including the patched build crates in `vendor/`) is available, and the release packages include the licence text and [third-party notices](packaging/THIRD-PARTY-NOTICES.md). Event Horizon's background photo is CC BY 4.0 (credited above and in the notices).

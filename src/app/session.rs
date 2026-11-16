@@ -17,6 +17,7 @@ use winit::{
 
 use super::{
     awake::Awake,
+    capture::FrameCapture,
     cursor::CursorHider,
     fade::SilenceFade,
     frame_stats::{FrameStats, FrameTiming},
@@ -28,6 +29,7 @@ use crate::{
         self, Capture, DeviceInfo,
         analysis::{Analyzer, AudioFrame, GAIN_LIMIT_DB, GAIN_STEP_DB},
         bands::BandSettings,
+        loudest::{self, Readout},
     },
     config::{self, Settings},
     input::Action,
@@ -39,6 +41,7 @@ use crate::{
     },
     ui::{
         Toast, Ui,
+        debug_hud::{DebugLabels, describe_peak, hz_long},
         fps_hud::{FpsDetail, FpsHud},
         overlay::{self, Hud, PanelInfo},
     },
@@ -97,6 +100,10 @@ pub struct Session {
     fade: SilenceFade,
     cursor: CursorHider,
     frame_stats: FrameStats,
+    /// The loudest frequency, for the debug readouts.
+    loudest: Readout,
+    /// Saves a frame and quits, when asked to by the environment (dev aid).
+    frame_capture: Option<FrameCapture>,
     last_frame: Instant,
 }
 
@@ -146,6 +153,8 @@ impl Session {
             fade: SilenceFade::default(),
             cursor: CursorHider::default(),
             frame_stats: FrameStats::default(),
+            loudest: Readout::default(),
+            frame_capture: FrameCapture::from_env(),
             last_frame: Instant::now(),
             displays: vec![main],
             slices: vec![WHOLE],
@@ -179,6 +188,18 @@ impl Session {
     pub fn ui_event(&mut self, event: &winit::event::WindowEvent) -> bool {
         let window = self.displays[0].window.clone();
         self.ui.on_window_event(&window, event)
+    }
+
+    /// Hands the main window to the OS to move with the mouse, as if its
+    /// title bar were being dragged. Does nothing in full screen or span mode.
+    pub fn start_window_move(&self) {
+        let window = self.window();
+        if self.spanning || window.fullscreen().is_some() {
+            return;
+        }
+        if let Err(e) = window.drag_window() {
+            log::warn!("couldn't move the window: {e}");
+        }
     }
 
     pub fn ui_wants_keyboard(&self) -> bool {
@@ -387,6 +408,8 @@ impl Session {
         self.analyzer.analyze(sample_rate, dt);
         let (beat, silent) = {
             let audio = self.analyzer.frame();
+            let peak = loudest::loudest(audio.spectrum_db, sample_rate);
+            self.loudest.update(peak, dt);
             (audio.beat.then_some(audio.beat_intensity), audio.silent)
         };
         self.awake.update(self.settings.keep_awake, silent, dt);
@@ -425,8 +448,9 @@ impl Session {
             ..audio
         };
         if self.show_debug {
+            let scale = self.window().scale_factor() as f32;
             self.debug_view
-                .update(self.gpu.queue(), &audio, sample_rate, size, dt);
+                .update(self.gpu.queue(), &audio, sample_rate, size, scale, dt);
         } else {
             self.switcher.advance(dt);
             let current = self.switcher.current();
@@ -435,6 +459,14 @@ impl Session {
             }
         }
         let wait = self.draw(size);
+        if let Some(capture) = &mut self.frame_capture
+            && capture.due(dt)
+        {
+            if let Err(e) = capture.save(self.gpu.device(), self.gpu.queue(), self.canvas.view()) {
+                log::error!("couldn't save the frame: {e:#}");
+            }
+            std::process::exit(0);
+        }
         self.save_if_changed(dt);
         let total = now.elapsed().as_secs_f32();
         self.frame_stats.record(FrameTiming {
@@ -524,6 +556,15 @@ impl Session {
         }
     }
 
+    /// The audio line of the detailed FPS readout.
+    fn audio_summary(&self) -> String {
+        let rate = hz_long(self.capture.sample_rate() as f32);
+        match self.loudest.shown() {
+            Some(peak) => format!("{rate} audio · loudest {}", describe_peak(peak)),
+            None => format!("{rate} audio · quiet"),
+        }
+    }
+
     /// Lays out the overlay and HUD, then acts on anything the user changed.
     fn build_ui(&mut self) {
         let before = self.settings.clone();
@@ -549,6 +590,10 @@ impl Session {
                 .collect(),
             keeping_awake: self.awake.is_holding(),
         };
+        let credit = (!self.show_debug)
+            .then(|| self.visualizers[self.switcher.current()].credit())
+            .flatten()
+            .map(str::to_owned);
         let hud = Hud {
             toast: self.toast.as_ref(),
             fps: self.settings.show_fps.then(|| FpsHud {
@@ -557,9 +602,18 @@ impl Session {
                     showing: self.showing(),
                     figures: *self.frame_stats.detail(),
                     recent_ms: self.frame_stats.recent_ms(),
+                    audio: self.audio_summary(),
                 }),
             }),
+            // Span mode splits the canvas across windows; the labels only
+            // fit the whole-canvas layout of a single window.
+            debug: (self.show_debug && !self.spanning).then(|| DebugLabels {
+                sample_rate: self.capture.sample_rate(),
+                band_edges: self.analyzer.frame().bands.edges().to_vec(),
+                loudest: self.loudest.shown(),
+            }),
             capture_error: capture_error.as_deref(),
+            credit: credit.as_deref(),
         };
         let mut requests = Default::default();
         let mut open = self.show_settings;

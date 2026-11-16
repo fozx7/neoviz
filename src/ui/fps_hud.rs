@@ -19,6 +19,8 @@ pub struct FpsDetail {
     pub figures: Detail,
     /// Recent frame times in ms, oldest first.
     pub recent_ms: Vec<f32>,
+    /// Capture rate and the loudest frequency right now.
+    pub audio: String,
 }
 
 const MARGIN: f32 = 12.0;
@@ -56,6 +58,7 @@ pub fn draw(painter: &egui::Painter, screen: Rect, hud: &FpsHud) {
         ),
         format!("late frames {} in last {:.0} s", d.late, d.secs),
         detail.showing.clone(),
+        detail.audio.clone(),
     ];
     for (i, text) in lines.iter().enumerate() {
         let size = if i == 0 { TEXT_SIZE } else { DETAIL_TEXT_SIZE };

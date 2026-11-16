@@ -2,6 +2,7 @@
 //! [`Session`].
 
 mod awake;
+mod capture;
 mod cursor;
 mod fade;
 pub mod frame_stats;
@@ -25,7 +26,7 @@ use winit::{
 use crate::{
     Args,
     config::Settings,
-    input::{Action, DoubleClickDetector, action_for_key},
+    input::{Action, DoubleClickDetector, DragToMove, action_for_key},
     render::gpu::Gpu,
     viz,
 };
@@ -42,6 +43,8 @@ pub struct App {
     config_path: Option<PathBuf>,
     session: Option<Session>,
     double_click: DoubleClickDetector,
+    /// Click and drag anywhere to move the window.
+    drag: DragToMove,
     /// Double-tapping F enters span mode.
     f_taps: DoubleClickDetector,
     error: Option<anyhow::Error>,
@@ -64,6 +67,7 @@ impl App {
             config_path,
             session: None,
             double_click: DoubleClickDetector::default(),
+            drag: DragToMove::default(),
             f_taps: DoubleClickDetector::default(),
             error: None,
         }
@@ -102,7 +106,7 @@ impl App {
 
         let window = Arc::new(event_loop.create_window(attrs).context("creating window")?);
         let (gpu, main) = pollster::block_on(Gpu::new(event_loop.owned_display_handle(), window))?;
-        let lineup = viz::create_all(gpu.device(), main.size());
+        let lineup = viz::create_all(gpu.device(), gpu.queue(), main.size());
         let names: Vec<&str> = lineup.visualizers.iter().map(|v| v.name()).collect();
         let start = match (&self.args.visualizer, &self.settings.visualizer) {
             // An explicit --visualizer must exist; a remembered one may have been renamed.
@@ -178,18 +182,35 @@ impl ApplicationHandler for App {
                     })
                     .map(|a| fullscreen_or_span(a, session.is_spanning(), &mut self.f_taps))
             }
-            WindowEvent::CursorMoved { .. } => {
+            WindowEvent::CursorMoved { position, .. } => {
                 session.cursor_moved();
+                if is_main && self.drag.moved((position.x, position.y)) {
+                    // A drag isn't the first half of a double-click.
+                    self.double_click.reset();
+                    session.start_window_move();
+                }
                 None
             }
             WindowEvent::MouseInput {
                 state: ElementState::Pressed,
                 button: MouseButton::Left,
                 ..
-            } if !ui_used => self
-                .double_click
-                .click(Instant::now())
-                .then_some(Action::ToggleFullscreen),
+            } if !ui_used => {
+                if is_main {
+                    self.drag.pressed();
+                }
+                self.double_click
+                    .click(Instant::now())
+                    .then_some(Action::ToggleFullscreen)
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Released,
+                button: MouseButton::Left,
+                ..
+            } => {
+                self.drag.released();
+                None
+            }
             _ => None,
         };
         if let Some(action) = action

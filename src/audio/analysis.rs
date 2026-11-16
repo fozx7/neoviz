@@ -20,10 +20,10 @@ pub const WAVEFORM_LEN: usize = 1024;
 pub const DB_FLOOR: f32 = -100.0;
 /// Bands in the default band set handed to visualizers.
 pub const DEFAULT_BANDS: usize = 64;
-const BAND_MIN_HZ: f32 = 20.0;
-const BAND_MAX_HZ: f32 = 16_000.0;
+pub const BAND_MIN_HZ: f32 = 20.0;
+pub const BAND_MAX_HZ: f32 = 16_000.0;
 /// Edges for the bass / mid / treble levels, in Hz.
-const LEVEL_EDGES: [f32; 4] = [20.0, 250.0, 4_000.0, 16_000.0];
+pub const LEVEL_EDGES: [f32; 4] = [20.0, 250.0, 4_000.0, 16_000.0];
 /// Range the beat detector listens to (kick drums and bass lines).
 const BEAT_MIN_HZ: f32 = 40.0;
 const BEAT_MAX_HZ: f32 = 150.0;

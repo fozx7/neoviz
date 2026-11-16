@@ -12,6 +12,7 @@
 pub mod analysis;
 pub mod bands;
 mod beat;
+pub mod loudest;
 
 #[cfg(target_os = "linux")]
 mod linux;
