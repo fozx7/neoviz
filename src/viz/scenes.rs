@@ -47,7 +47,7 @@ impl Scene {
     fn clock_rates(self, audio: &AudioFrame) -> (f32, f32) {
         match self {
             Self::EventHorizon => (0.35 + 0.9 * audio.mid + 0.5 * audio.bass, 0.02),
-            Self::OilOnIce => (0.05 + 0.25 * audio.mid + 0.15 * audio.bass, 0.03),
+            Self::OilOnIce => (0.03 + 0.15 * audio.mid + 0.09 * audio.bass, 0.02),
         }
     }
 }
