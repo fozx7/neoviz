@@ -98,6 +98,8 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Lineup {
         Box::new(starfield::Starfield::new(device, size)),
         Box::new(scenes::SceneViz::new(device, scenes::Scene::EventHorizon)),
         Box::new(scenes::SceneViz::new(device, scenes::Scene::OilOnIce)),
+        Box::new(scenes::SceneViz::new(device, scenes::Scene::BurningWorld)),
+        Box::new(scenes::SceneViz::new(device, scenes::Scene::DeepNebula)),
     ];
     #[cfg(milkdrop)]
     match milkdrop::MilkDrop::new(device, size) {

@@ -1,6 +1,7 @@
 //! Visualizers that draw a whole scene in one shader, each pass from scratch:
-//! Event Horizon (a black hole with a lensed accretion disk) and Oil on Ice
-//! (iridescent oil slicks drifting over dark ice).
+//! Event Horizon (a black hole with a lensed accretion disk), Oil on Ice
+//! (iridescent oil slicks drifting over dark ice), Burning World (a desert
+//! planet swept by firestorms) and Deep Nebula (drifting through layered gas).
 
 use crate::{
     audio::{analysis::AudioFrame, bands::smoothing_coef},
@@ -16,6 +17,8 @@ use super::{
 pub enum Scene {
     EventHorizon,
     OilOnIce,
+    BurningWorld,
+    DeepNebula,
 }
 
 impl Scene {
@@ -23,6 +26,8 @@ impl Scene {
         match self {
             Self::EventHorizon => "Event Horizon",
             Self::OilOnIce => "Oil on Ice",
+            Self::BurningWorld => "Burning World",
+            Self::DeepNebula => "Deep Nebula",
         }
     }
 
@@ -30,6 +35,8 @@ impl Scene {
         match self {
             Self::EventHorizon => include_str!("../../shaders/event_horizon.wgsl"),
             Self::OilOnIce => include_str!("../../shaders/oil_on_ice.wgsl"),
+            Self::BurningWorld => include_str!("../../shaders/burning_world.wgsl"),
+            Self::DeepNebula => include_str!("../../shaders/deep_nebula.wgsl"),
         }
     }
 
@@ -37,17 +44,20 @@ impl Scene {
     fn flash_decay_secs(self) -> f32 {
         match self {
             Self::EventHorizon => 0.6,
-            Self::OilOnIce => 0.4,
+            Self::OilOnIce | Self::BurningWorld => 0.4,
+            Self::DeepNebula => 0.9,
         }
     }
 
     /// How fast each of the scene's two clocks runs for this audio: the main
-    /// motion (the disk's spin, the oil's drift) and a slow one (the camera,
-    /// the light).
+    /// motion (the disk's spin, the oil's drift, the fire's advance, the
+    /// gas's flow) and a slow one (the camera, the light, the planet's spin).
     fn clock_rates(self, audio: &AudioFrame) -> (f32, f32) {
         match self {
             Self::EventHorizon => (0.35 + 0.9 * audio.mid + 0.5 * audio.bass, 0.02),
             Self::OilOnIce => (0.03 + 0.15 * audio.mid + 0.09 * audio.bass, 0.02),
+            Self::BurningWorld => (0.012 + 0.03 * audio.bass, 0.01),
+            Self::DeepNebula => (0.04 + 0.1 * audio.mid, 0.012),
         }
     }
 }

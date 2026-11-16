@@ -14,48 +14,6 @@ const ICE: vec3f = vec3f(0.0015, 0.003, 0.006);
 const ICE_DEEP: vec3f = vec3f(0.005, 0.012, 0.02);
 const CRACK: vec3f = vec3f(0.25, 0.36, 0.48);
 
-// Random numbers from integer hashing (PCG). The usual fract(sin(...)) trick
-// isn't exact across noise cells on every GPU, and the film colour is so
-// sensitive to thickness that the tiny mismatch shows up as squares.
-fn pcg2(v: vec2u) -> vec2u {
-    var x = v * 1664525u + 1013904223u;
-    x.x += x.y * 1664525u;
-    x.y += x.x * 1664525u;
-    x = x ^ (x >> vec2u(16u));
-    x.x += x.y * 1664525u;
-    x.y += x.x * 1664525u;
-    return x ^ (x >> vec2u(16u));
-}
-
-// Two random numbers (0..1) for the lattice point `q` (whole numbers).
-fn hash22(q: vec2f) -> vec2f {
-    return vec2f(pcg2(bitcast<vec2u>(vec2i(round(q))))) / 4294967295.0;
-}
-
-// Smooth value noise and fractal noise built on `hash22`, 0..1.
-fn smooth_noise(q: vec2f) -> f32 {
-    let i = floor(q);
-    let f = fract(q);
-    let u = f * f * (3.0 - 2.0 * f);
-    let a = hash22(i).x;
-    let b = hash22(i + vec2f(1.0, 0.0)).x;
-    let c = hash22(i + vec2f(0.0, 1.0)).x;
-    let d = hash22(i + vec2f(1.0, 1.0)).x;
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-fn smooth_fbm(q: vec2f) -> f32 {
-    var sum = 0.0;
-    var amp = 0.5;
-    var x = q;
-    for (var i = 0; i < 4; i++) {
-        sum += amp * smooth_noise(x);
-        x = x * 2.03 + vec2f(1.7, 9.2);
-        amp *= 0.5;
-    }
-    return sum;
-}
-
 // Distance to the nearest edge of a Voronoi cell: the cracks in the ice.
 fn crack_distance(q: vec2f) -> f32 {
     let n = floor(q);
