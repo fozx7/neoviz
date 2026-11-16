@@ -1,8 +1,9 @@
 //! Visualizers that draw a whole scene in one shader, each pass from scratch:
 //! Event Horizon (a black hole with a lensed accretion disk), Oil on Ice
 //! (iridescent oil slicks drifting over dark ice), Burning World (a desert
-//! planet swept by firestorms), Deep Nebula (light behind a band of dust) and
-//! Windswept Field (gusts rolling through long grass).
+//! planet swept by firestorms), Deep Nebula (light behind a band of dust),
+//! and Windswept Field and Field From Above (gusts rolling through long
+//! grass, seen across and from straight above).
 
 use crate::{
     audio::{analysis::AudioFrame, bands::smoothing_coef},
@@ -24,6 +25,7 @@ pub enum Scene {
     BurningWorld,
     DeepNebula,
     WindsweptField,
+    FieldFromAbove,
 }
 
 /// The full COSMOS field from ESO's VISTA telescope (UltraVISTA), behind
@@ -34,12 +36,13 @@ const DEEP_FIELD_CREDIT: &str =
     "Background: ESO/UltraVISTA team. Acknowledgement: TERAPIX/CNRS/INSU/CASU";
 
 impl Scene {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::EventHorizon,
         Self::OilOnIce,
         Self::BurningWorld,
         Self::DeepNebula,
         Self::WindsweptField,
+        Self::FieldFromAbove,
     ];
 
     pub fn name(self) -> &'static str {
@@ -49,6 +52,7 @@ impl Scene {
             Self::BurningWorld => "Burning World",
             Self::DeepNebula => "Deep Nebula",
             Self::WindsweptField => "Windswept Field",
+            Self::FieldFromAbove => "Field From Above",
         }
     }
 
@@ -58,7 +62,17 @@ impl Scene {
             Self::OilOnIce => include_str!("../../shaders/oil_on_ice.wgsl"),
             Self::BurningWorld => include_str!("../../shaders/burning_world.wgsl"),
             Self::DeepNebula => include_str!("../../shaders/deep_nebula.wgsl"),
-            Self::WindsweptField => include_str!("../../shaders/windswept_field.wgsl"),
+            Self::WindsweptField | Self::FieldFromAbove => {
+                include_str!("../../shaders/windswept_field.wgsl")
+            }
+        }
+    }
+
+    /// The shader's `p.variant`, for scenes that share a shader.
+    fn variant(self) -> f32 {
+        match self {
+            Self::FieldFromAbove => 1.0,
+            _ => 0.0,
         }
     }
 
@@ -80,7 +94,7 @@ impl Scene {
         match self {
             Self::EventHorizon => 0.6,
             Self::OilOnIce | Self::BurningWorld => 0.4,
-            Self::DeepNebula | Self::WindsweptField => 0.9,
+            Self::DeepNebula | Self::WindsweptField | Self::FieldFromAbove => 0.9,
         }
     }
 
@@ -93,7 +107,9 @@ impl Scene {
             Self::OilOnIce => (0.03 + 0.15 * audio.mid + 0.09 * audio.bass, 0.02),
             Self::BurningWorld => (0.012 + 0.03 * audio.bass, 0.01),
             Self::DeepNebula => (0.03 + 0.08 * audio.mid, 0.025),
-            Self::WindsweptField => (0.2 + 0.35 * audio.mid + 0.25 * audio.bass, 0.004),
+            Self::WindsweptField | Self::FieldFromAbove => {
+                (0.2 + 0.35 * audio.mid + 0.25 * audio.bass, 0.004)
+            }
         }
     }
 }
@@ -160,6 +176,7 @@ impl Visualizer for SceneViz {
         self.bands.extend_from_slice(audio.bands.values());
         self.params = LayerParams {
             extra: [self.motion, self.slow, self.swell, 0.0],
+            variant: self.scene.variant(),
             ..layer_params(audio, self.params.size, self.time, dt, flash)
         };
     }
