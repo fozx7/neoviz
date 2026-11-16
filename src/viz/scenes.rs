@@ -1,9 +1,8 @@
 //! Visualizers that draw a whole scene in one shader, each pass from scratch:
 //! Event Horizon (a black hole with a lensed accretion disk), Oil on Ice
 //! (iridescent oil slicks drifting over dark ice), Burning World (a desert
-//! planet swept by firestorms), Deep Nebula (light behind a band of dust),
-//! and Windswept Field and Field From Above (gusts rolling through long
-//! grass, seen across and from straight above).
+//! planet swept by firestorms), Deep Nebula (light behind a band of dust)
+//! and Windswept Field (gusts rolling through the long grass of a moor).
 
 use crate::{
     audio::{analysis::AudioFrame, bands::smoothing_coef},
@@ -25,7 +24,6 @@ pub enum Scene {
     BurningWorld,
     DeepNebula,
     WindsweptField,
-    FieldFromAbove,
 }
 
 /// The full COSMOS field from ESO's VISTA telescope (UltraVISTA), behind
@@ -36,13 +34,12 @@ const DEEP_FIELD_CREDIT: &str =
     "Background: ESO/UltraVISTA team. Acknowledgement: TERAPIX/CNRS/INSU/CASU";
 
 impl Scene {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::EventHorizon,
         Self::OilOnIce,
         Self::BurningWorld,
         Self::DeepNebula,
         Self::WindsweptField,
-        Self::FieldFromAbove,
     ];
 
     pub fn name(self) -> &'static str {
@@ -52,7 +49,6 @@ impl Scene {
             Self::BurningWorld => "Burning World",
             Self::DeepNebula => "Deep Nebula",
             Self::WindsweptField => "Windswept Field",
-            Self::FieldFromAbove => "Field From Above",
         }
     }
 
@@ -62,17 +58,7 @@ impl Scene {
             Self::OilOnIce => include_str!("../../shaders/oil_on_ice.wgsl"),
             Self::BurningWorld => include_str!("../../shaders/burning_world.wgsl"),
             Self::DeepNebula => include_str!("../../shaders/deep_nebula.wgsl"),
-            Self::WindsweptField | Self::FieldFromAbove => {
-                include_str!("../../shaders/windswept_field.wgsl")
-            }
-        }
-    }
-
-    /// The shader's `p.variant`, for scenes that share a shader.
-    fn variant(self) -> f32 {
-        match self {
-            Self::FieldFromAbove => 1.0,
-            _ => 0.0,
+            Self::WindsweptField => include_str!("../../shaders/windswept_field.wgsl"),
         }
     }
 
@@ -94,28 +80,30 @@ impl Scene {
         match self {
             Self::EventHorizon => 0.6,
             Self::OilOnIce | Self::BurningWorld => 0.4,
-            Self::DeepNebula | Self::WindsweptField | Self::FieldFromAbove => 0.9,
+            Self::DeepNebula | Self::WindsweptField => 0.9,
         }
     }
 
     /// How fast each of the scene's two clocks runs for this audio: the main
     /// motion (the disk's spin, the oil's drift, the fire's advance, the
-    /// gas's flow) and a slow one (the camera, the light, the planet's spin).
-    fn clock_rates(self, audio: &AudioFrame) -> (f32, f32) {
+    /// gas's flow, the wind) and a slow one (the camera, the light, the
+    /// planet's spin, the clouds). `low` is the bass, smoothed.
+    fn clock_rates(self, audio: &AudioFrame, low: f32) -> (f32, f32) {
         match self {
             Self::EventHorizon => (0.35 + 0.9 * audio.mid + 0.5 * audio.bass, 0.02),
             Self::OilOnIce => (0.03 + 0.15 * audio.mid + 0.09 * audio.bass, 0.02),
             Self::BurningWorld => (0.012 + 0.03 * audio.bass, 0.01),
             Self::DeepNebula => (0.03 + 0.08 * audio.mid, 0.025),
-            Self::WindsweptField | Self::FieldFromAbove => {
-                (0.2 + 0.35 * audio.mid + 0.25 * audio.bass, 0.004)
-            }
+            // Only the smoothed bass, so the grass never twitches.
+            Self::WindsweptField => (0.25 + 0.4 * low, 0.004),
         }
     }
 }
 
 /// How quickly the smoothed loudness follows the music.
 const SWELL_SECS: f32 = 0.4;
+/// How quickly the smoothed bass follows the music.
+const LOW_SECS: f32 = 0.5;
 
 pub struct SceneViz {
     scene: Scene,
@@ -128,6 +116,8 @@ pub struct SceneViz {
     slow: f32,
     /// Loudness smoothed over [`SWELL_SECS`], for slow swells.
     swell: f32,
+    /// The bass smoothed over [`LOW_SECS`], for motion that mustn't jitter.
+    low: f32,
     flash: BeatFlash,
 }
 
@@ -150,6 +140,7 @@ impl SceneViz {
             motion: 0.0,
             slow: 0.0,
             swell: 0.0,
+            low: 0.0,
             flash: BeatFlash::new(scene.flash_decay_secs()),
         })
     }
@@ -166,17 +157,17 @@ impl Visualizer for SceneViz {
 
     fn update(&mut self, audio: &AudioFrame, dt: f32) {
         self.time += dt;
-        let (motion_rate, slow_rate) = self.scene.clock_rates(audio);
-        self.motion += dt * motion_rate;
-        self.slow += dt * slow_rate;
         let loudness = (audio.bass + audio.mid + audio.treble) / 3.0;
         self.swell += (loudness - self.swell) * smoothing_coef(SWELL_SECS, dt);
+        self.low += (audio.bass - self.low) * smoothing_coef(LOW_SECS, dt);
+        let (motion_rate, slow_rate) = self.scene.clock_rates(audio, self.low);
+        self.motion += dt * motion_rate;
+        self.slow += dt * slow_rate;
         let flash = self.flash.update(audio, dt);
         self.bands.clear();
         self.bands.extend_from_slice(audio.bands.values());
         self.params = LayerParams {
-            extra: [self.motion, self.slow, self.swell, 0.0],
-            variant: self.scene.variant(),
+            extra: [self.motion, self.slow, self.swell, self.low],
             ..layer_params(audio, self.params.size, self.time, dt, flash)
         };
     }

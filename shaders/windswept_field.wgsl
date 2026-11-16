@@ -3,18 +3,17 @@
 // passing over them and turn paler where they're pressed flat, so the gusts
 // show as pale waves sweeping across the field.
 //
-// p.variant 0 looks out over the field from a high angle: rows of blades at
+// The view looks out over the field from a high angle: rows of blades at
 // increasing distance (nearest first), each row smaller and hazier, up to a
-// low horizon of rolling ground. p.variant 1 looks straight down into the
-// grass, where each blade is a stroke lying in the direction it's blown.
+// low horizon.
 //
-// Gusts strengthen with the bass and loudness, the mids speed them up,
-// beats push a stronger gust through, and the treble adds a quick flutter.
+// The grass only follows slow changes in the music, so it never twitches:
+// the gusts grow and travel faster with the bass and loudness, both smoothed
+// over about half a second.
 //
 // p.extra.x = wind clock (the gusts' travel), p.extra.y = cloud clock,
-// p.extra.z = loudness, smoothed.
+// p.extra.z = loudness, smoothed; p.extra.w = bass, smoothed.
 
-// --- Looking out (variant 0) -------------------------------------------------
 const HORIZON: f32 = 0.5;      // screen height of the horizon (y up, -1..1)
 const CAM_HEIGHT: f32 = 2.2;   // eye height above the ground
 const NEAREST: f32 = 1.2;      // distance of the nearest row (roots below the screen)
@@ -23,11 +22,6 @@ const ROWS: i32 = 44;
 const BLADE_HEIGHT: f32 = 1.5;
 const BLADE_WIDTH: f32 = 0.013;
 const BLADE_SPACING: f32 = 0.009;
-
-// --- Looking down (variant 1) ------------------------------------------------
-const DOWN_LAYERS: i32 = 6;
-const DOWN_CELLS: f32 = 16.0;  // blades per screen unit in the bottom layer
-const DOWN_WIDTH: f32 = 0.09;  // blade width, as a fraction of a cell
 
 // --- Colours: an overcast moor -----------------------------------------------
 const SKY_LOW: vec3f = vec3f(0.36, 0.41, 0.4);
@@ -42,7 +36,7 @@ const SHEEN: vec3f = vec3f(0.38, 0.46, 0.36);
 
 // How strongly the wind is blowing right now, overall.
 fn wind_strength() -> f32 {
-    return 0.45 + 0.5 * p.extra.z + 0.45 * p.bass + 0.5 * p.flash;
+    return 0.45 + 0.4 * p.extra.z + 0.6 * p.extra.w;
 }
 
 // The gust at ground position (x, z): 0 = calm, ~1+ = a strong gust. Gusts
@@ -54,10 +48,9 @@ fn gust(x: f32, z: f32) -> f32 {
 }
 
 // How far a blade at (x, z) bends: its tip moves this fraction of its height
-// downwind. A sway everywhere (fluttering faster with the treble), plus gusts.
+// downwind. A gentle sway everywhere, plus the gusts.
 fn bend(x: f32, z: f32, phase: f32) -> f32 {
-    let flutter = 2.2 + 3.0 * p.treble;
-    let sway = 0.12 * sin(p.extra.x * flutter + x * 0.9 + phase * 6.0);
+    let sway = 0.12 * sin(p.extra.x * 2.2 + x * 0.9 + phase * 6.0);
     return 0.25 + sway + 0.9 * gust(x, z);
 }
 
@@ -169,72 +162,11 @@ fn looking_out(q: vec2f, pixel: f32) -> vec3f {
     return col * (1.0 - grass.a) + grass.rgb;
 }
 
-// Distance from `q` to the segment a..b, and how far along it (0..1).
-fn segment(q: vec2f, a: vec2f, b: vec2f) -> vec2f {
-    let ab = b - a;
-    let t = clamp(dot(q - a, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
-    return vec2f(length(q - a - ab * t), t);
-}
-
-fn looking_down(q: vec2f, pixel: f32) -> vec3f {
-    // The view drifts slowly, as if hovering over the field.
-    let view = q + vec2f(p.extra.y * 0.6, 0.15 * sin(p.extra.y * 2.0));
-    var col = UNDERGROWTH;
-    // Layers from the ground up: each one's blades are a little longer and
-    // lighter (nearer the top of the grass, where the light is).
-    for (var layer = 0; layer < DOWN_LAYERS; layer++) {
-        let l = f32(layer);
-        let cells = DOWN_CELLS * (1.0 - 0.12 * l);
-        let g = view * cells + vec2f(l * 17.3, l * 5.1);
-        let cell = floor(g);
-        for (var j = -1; j <= 1; j++) {
-            for (var i = -3; i <= 0; i++) {
-                let c = cell + vec2f(f32(i), f32(j));
-                let h = hash22(c + l * 101.0);
-                let root = c + h;
-                // Wind in this layer's units -> the field's.
-                let world = root / cells * 3.0;
-                let b = bend(world.x, world.y * 2.0, h.x);
-                // Seen from above, an upright blade is a dot; the more it's
-                // blown over, the longer the stroke it makes downwind.
-                let angle = 0.3 * (h.y - 0.5) + 0.6 * (smooth_noise(world * 0.8 + 3.0) - 0.5);
-                let dir = vec2f(cos(angle), sin(angle));
-                let flat = clamp(b - 0.3, 0.0, 1.3);
-                let reach = (0.2 + 2.0 * flat) * (0.6 + 0.4 * h.y) * (1.0 + 0.15 * l);
-                // A gentle curve: two segments, the second turning a little.
-                let curl = (h.x - 0.5) * 0.6;
-                let mid = root + dir * reach * 0.5;
-                let dir2 = vec2f(cos(angle + curl), sin(angle + curl));
-                let first = segment(g, root, mid);
-                let second = segment(g, mid, mid + dir2 * reach * 0.5);
-                var d = vec2f(first.x, 0.5 * first.y);
-                if (second.x < first.x) {
-                    d = vec2f(second.x, 0.5 + 0.5 * second.y);
-                }
-                let half_width = DOWN_WIDTH * (1.0 - 0.7 * d.y) * (1.0 + 0.4 * h.x);
-                let coverage = clamp(0.5 - (d.x - half_width) / (pixel * cells), 0.0, 1.0);
-                if (coverage > 0.0) {
-                    let lift = (l + d.y) / f32(DOWN_LAYERS);
-                    let clump = clumps(world.x, world.y * 2.0);
-                    let colour = grass_colour(0.3 + 0.7 * lift, h, clump, flat - 0.2) * (0.55 + 0.7 * lift);
-                    col = mix(col, colour, coverage);
-                }
-            }
-        }
-    }
-    return col;
-}
-
 @fragment
 fn fs(in: FullscreenOut) -> @location(0) vec4f {
     let q = centered(in.uv);
     let pixel = 2.0 / p.resolution.y;
-    var col: vec3f;
-    if (p.variant < 0.5) {
-        col = looking_out(q, pixel);
-    } else {
-        col = looking_down(q, pixel);
-    }
+    let col = looking_out(q, pixel);
     let vignette = 1.0 - 0.35 * dot(in.uv - 0.5, in.uv - 0.5) * 2.0;
     return vec4f(col * vignette, 1.0);
 }
