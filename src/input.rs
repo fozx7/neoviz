@@ -73,6 +73,43 @@ impl DoubleClickDetector {
     }
 }
 
+/// How far (in pixels) the mouse must move with the button held before it
+/// starts moving the window. Less than this is still a click.
+const DRAG_THRESHOLD_PX: f64 = 6.0;
+
+/// Moving the window by dragging anywhere in it: watches the left button and
+/// the cursor, and says when a press has turned into a drag.
+#[derive(Debug, Default)]
+pub struct DragToMove {
+    cursor: Option<(f64, f64)>,
+    pressed_at: Option<(f64, f64)>,
+}
+
+impl DragToMove {
+    /// The left button went down on the visuals (not on the settings panel).
+    pub fn pressed(&mut self) {
+        self.pressed_at = self.cursor;
+    }
+
+    pub fn released(&mut self) {
+        self.pressed_at = None;
+    }
+
+    /// The cursor moved to `pos`. Returns true once when a press becomes a
+    /// drag, at which point the window should start moving.
+    pub fn moved(&mut self, pos: (f64, f64)) -> bool {
+        self.cursor = Some(pos);
+        let Some(start) = self.pressed_at else {
+            return false;
+        };
+        let far = (pos.0 - start.0).hypot(pos.1 - start.1) >= DRAG_THRESHOLD_PX;
+        if far {
+            self.pressed_at = None;
+        }
+        far
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +231,32 @@ mod tests {
         assert!(!d.click(t0));
         assert!(d.click(t0 + Duration::from_millis(100)));
         assert!(!d.click(t0 + Duration::from_millis(200)));
+    }
+
+    #[test]
+    fn dragging_past_the_threshold_starts_a_move_once() {
+        let mut d = DragToMove::default();
+        d.moved((100.0, 100.0));
+        d.pressed();
+        assert!(!d.moved((103.0, 102.0)), "a small wobble is still a click");
+        assert!(d.moved((110.0, 100.0)));
+        assert!(!d.moved((140.0, 100.0)), "only starts the move once");
+    }
+
+    #[test]
+    fn moving_without_the_button_held_does_nothing() {
+        let mut d = DragToMove::default();
+        d.moved((0.0, 0.0));
+        assert!(!d.moved((500.0, 500.0)));
+        d.pressed();
+        d.released();
+        assert!(!d.moved((0.0, 0.0)));
+    }
+
+    #[test]
+    fn a_press_before_any_cursor_position_is_ignored() {
+        let mut d = DragToMove::default();
+        d.pressed();
+        assert!(!d.moved((300.0, 300.0)));
     }
 }

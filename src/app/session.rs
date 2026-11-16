@@ -186,6 +186,18 @@ impl Session {
         self.ui.on_window_event(&window, event)
     }
 
+    /// Hands the main window to the OS to move with the mouse, as if its
+    /// title bar were being dragged. Does nothing in full screen or span mode.
+    pub fn start_window_move(&self) {
+        let window = self.window();
+        if self.spanning || window.fullscreen().is_some() {
+            return;
+        }
+        if let Err(e) = window.drag_window() {
+            log::warn!("couldn't move the window: {e}");
+        }
+    }
+
     pub fn ui_wants_keyboard(&self) -> bool {
         self.ui.wants_keyboard()
     }
