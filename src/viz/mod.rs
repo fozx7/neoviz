@@ -11,6 +11,7 @@ mod lightshow;
 #[cfg(milkdrop)]
 mod milkdrop;
 mod particles;
+mod scenes;
 mod scope;
 mod starfield;
 
@@ -79,7 +80,7 @@ pub struct Lineup {
     pub failures: Vec<(String, String)>,
 }
 
-/// Every built-in visualizer, in rotation order: the seven main ones first,
+/// Every built-in visualizer, in rotation order: the main ones first,
 /// then the alternate variants.
 pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Lineup {
     #[allow(unused_mut)] // only pushed to when MilkDrop is built in
@@ -95,6 +96,8 @@ pub fn create_all(device: &wgpu::Device, size: (u32, u32)) -> Lineup {
         Box::new(particles::Particles::new(device, size)),
         Box::new(lightshow::Lightshow::new(device, size)),
         Box::new(starfield::Starfield::new(device, size)),
+        Box::new(scenes::SceneViz::new(device, scenes::Scene::EventHorizon)),
+        Box::new(scenes::SceneViz::new(device, scenes::Scene::OilOnIce)),
     ];
     #[cfg(milkdrop)]
     match milkdrop::MilkDrop::new(device, size) {
