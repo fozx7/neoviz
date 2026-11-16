@@ -30,6 +30,14 @@ const SKY_PAN: f32 = 0.025;
 const SKY_SOFTEN: f32 = 0.35;
 const SKY_SATURATION: f32 = 0.8;
 const SKY_HIGHLIGHTS: f32 = 2.0;
+// A faint glow around the bigger, brighter galaxies, so they look like they
+// give off light. It comes from blurred copies of the photo (mip levels this
+// many steps smaller), keeping only what's still bright after blurring, so
+// small points of light don't glow.
+const GLOW_NEAR: f32 = 2.5;
+const GLOW_FAR: f32 = 4.0;
+const GLOW_THRESHOLD: f32 = 0.05;
+const GLOW_STRENGTH: f32 = 0.5;
 
 // The backdrop (see ImageTexture): a deep-field photo, mirrored at its edges.
 @group(1) @binding(0) var sky_image: texture_2d<f32>;
@@ -116,7 +124,13 @@ fn sky(d: vec3f, right: vec3f, up: vec3f, forward: vec3f, blur: f32) -> vec3f {
     // Hold back the brightest (nearest-looking) galaxies so nothing pops forward.
     let tamed = photo / (1.0 + SKY_HIGHLIGHTS * photo);
     let muted = mix(vec3f(dot(tamed, vec3f(0.3, 0.55, 0.15))), tamed, SKY_SATURATION);
-    return muted * SKY_EXPOSURE * (1.0 + 0.15 * p.treble + 0.2 * p.flash);
+
+    let near = textureSampleLevel(sky_image, sky_sampler, uv, lod + GLOW_NEAR).rgb;
+    let far = textureSampleLevel(sky_image, sky_sampler, uv, lod + GLOW_FAR).rgb;
+    let blurred = 0.6 * near + 0.4 * far;
+    let glow = max(blurred - GLOW_THRESHOLD, vec3f(0.0)) * GLOW_STRENGTH;
+
+    return (muted + glow) * SKY_EXPOSURE * (1.0 + 0.15 * p.treble + 0.2 * p.flash);
 }
 
 @fragment
