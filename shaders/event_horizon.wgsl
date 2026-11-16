@@ -21,11 +21,15 @@ const PHOTON_SPHERE: f32 = 1.5;
 // The backdrop photo: how much of its height spans one radian of sky (so how
 // big it looks), how bright it's shown, the level that becomes black (so the
 // photo's grey sky goes dark), the contrast, and how far its centre wanders.
-const SKY_SCALE: f32 = 0.55;
-const SKY_EXPOSURE: f32 = 0.85;
+const SKY_SCALE: f32 = 0.92;
+const SKY_EXPOSURE: f32 = 1.0;
 const SKY_BLACK: f32 = 0.025;
 const SKY_CONTRAST: f32 = 1.25;
-const SKY_PAN: f32 = 0.06;
+const SKY_PAN: f32 = 0.025;
+// Distance cues: a little softening (extra mip level) and less colour.
+const SKY_SOFTEN: f32 = 0.35;
+const SKY_SATURATION: f32 = 0.8;
+const SKY_HIGHLIGHTS: f32 = 2.0;
 
 // The backdrop (see ImageTexture): a deep-field photo, mirrored at its edges.
 @group(1) @binding(0) var sky_image: texture_2d<f32>;
@@ -105,11 +109,14 @@ fn sky(d: vec3f, right: vec3f, up: vec3f, forward: vec3f, blur: f32) -> vec3f {
     let uv = vec2f(0.5) + drift + spread;
     // About one photo pixel per screen pixel when unlensed.
     let texels = size.y * SKY_SCALE * 2.0 * FOV / p.resolution.y;
-    let lod = max(log2(texels), 0.0) + blur;
+    let lod = max(log2(texels), 0.0) + SKY_SOFTEN + blur;
     let raw = textureSampleLevel(sky_image, sky_sampler, uv, lod).rgb;
     // Deepen the blacks and add contrast, so the photo sits back behind the disk.
     let photo = pow(max(raw - SKY_BLACK, vec3f(0.0)) / (1.0 - SKY_BLACK), vec3f(SKY_CONTRAST));
-    return photo * SKY_EXPOSURE * (1.0 + 0.15 * p.treble + 0.2 * p.flash);
+    // Hold back the brightest (nearest-looking) galaxies so nothing pops forward.
+    let tamed = photo / (1.0 + SKY_HIGHLIGHTS * photo);
+    let muted = mix(vec3f(dot(tamed, vec3f(0.3, 0.55, 0.15))), tamed, SKY_SATURATION);
+    return muted * SKY_EXPOSURE * (1.0 + 0.15 * p.treble + 0.2 * p.flash);
 }
 
 @fragment
