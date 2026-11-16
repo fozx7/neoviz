@@ -31,6 +31,8 @@ const CLOUD_LIGHT: vec3f = vec3f(0.5, 0.55, 0.53);
 const HAZE: vec3f = vec3f(0.3, 0.36, 0.33);
 // The mist the far field and the sky both fade into at the horizon.
 const MIST: vec3f = vec3f(0.33, 0.385, 0.365);
+// Distant moorland, before the mist lightens it.
+const MOOR: vec3f = vec3f(0.12, 0.17, 0.12);
 const UNDERGROWTH: vec3f = vec3f(0.035, 0.07, 0.035);
 const GREEN: vec3f = vec3f(0.07, 0.15, 0.06);
 const SAGE: vec3f = vec3f(0.17, 0.25, 0.13);
@@ -130,15 +132,27 @@ fn sky(q: vec2f) -> vec3f {
 }
 
 fn looking_out(q: vec2f, pixel: f32) -> vec3f {
-    // Behind the grass: the sky, then two low lines of distant land (a
-    // paler far one, a nearer one), all with soft edges.
+    // Behind the grass: the sky, then rolling moorland rising beyond the
+    // field in two ranges (a paler far one, a darker nearer one), with soft
+    // edges and a faint texture of grass.
     var col = sky(q);
-    let far_land = HORIZON + 0.006 + 0.035 * pow(smooth_fbm(vec2f(q.x * 0.6 + 8.0, 0.5)), 1.4)
-        + 0.01 * smooth_fbm(vec2f(q.x * 3.0, 1.5));
-    let near_land = HORIZON + 0.002 + 0.02 * smooth_fbm(vec2f(q.x * 1.3 + 2.0, 3.5));
+    // Hill shapes: noise stretched to its full range, so the skyline really
+    // rises and falls across the screen.
+    let far_shape = smoothstep(0.3, 0.7, smooth_fbm(vec2f(q.x * 1.3 + 8.0, 0.5)));
+    let near_shape = smoothstep(0.3, 0.7, smooth_fbm(vec2f(q.x * 2.1 + 2.0, 3.5)));
+    let far_land = HORIZON + 0.008 + 0.065 * far_shape + 0.008 * smooth_fbm(vec2f(q.x * 6.0, 1.5));
+    let near_land = HORIZON + 0.002 + 0.04 * near_shape;
     let soft = 2.0 * pixel;
-    col = mix(col, mix(HAZE * 0.9, MIST, 0.6), smoothstep(far_land + soft, far_land - soft, q.y));
-    col = mix(col, mix(HAZE * 0.8, MIST, 0.35), smoothstep(near_land + soft, near_land - soft, q.y));
+    let texture = 0.85 + 0.3 * smooth_fbm(vec2f(q.x * 40.0, q.y * 120.0));
+    let far_moor = mix(MOOR * texture, MIST, 0.6);
+    // Each range fades into the mist towards its foot, where it meets the
+    // misty far edge of the field.
+    let far_foot = smoothstep(HORIZON, far_land, q.y);
+    let far_moor_lit = mix(far_moor, MIST, 0.5 * (1.0 - far_foot));
+    let foot = smoothstep(HORIZON, near_land, q.y);
+    let near_moor = mix(MOOR * texture, MIST, 0.3 + 0.55 * (1.0 - foot));
+    col = mix(col, far_moor_lit, smoothstep(far_land + soft, far_land - soft, q.y));
+    col = mix(col, near_moor, smoothstep(near_land + soft, near_land - soft, q.y));
     if (q.y < HORIZON) {
         // Between and beyond the blades: dense undergrowth, fading into the
         // haze with distance; the far field rolls gently and shows the gusts
@@ -167,7 +181,7 @@ fn looking_out(q: vec2f, pixel: f32) -> vec3f {
 
     // Mist lying along the horizon, so land and sky melt into each other.
     let mist = exp(-abs(q.y - (HORIZON + 0.015)) * 16.0);
-    return mix(col, MIST, 0.6 * mist);
+    return mix(col, MIST, 0.4 * mist);
 }
 
 @fragment
