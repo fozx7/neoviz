@@ -13,6 +13,7 @@ use crate::{
 
 use super::{
     Toast,
+    debug_hud::{self, DebugLabels},
     fps_hud::{self, FpsHud},
 };
 
@@ -322,6 +323,8 @@ fn footer(ui: &mut egui::Ui, info: &PanelInfo) {
 pub struct Hud<'a> {
     pub toast: Option<&'a Toast>,
     pub fps: Option<FpsHud>,
+    /// Labels for the analysis debug view, while it's showing.
+    pub debug: Option<DebugLabels>,
     pub capture_error: Option<&'a str>,
 }
 
@@ -340,6 +343,9 @@ pub fn draw_hud(ctx: &egui::Context, hud: &Hud) {
             Color32::WHITE,
             toast.alpha(),
         );
+    }
+    if let Some(labels) = &hud.debug {
+        debug_hud::draw(&painter, screen, labels);
     }
     if let Some(fps) = &hud.fps {
         fps_hud::draw(&painter, screen, fps);

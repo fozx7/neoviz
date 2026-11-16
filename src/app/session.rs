@@ -28,6 +28,7 @@ use crate::{
         self, Capture, DeviceInfo,
         analysis::{Analyzer, AudioFrame, GAIN_LIMIT_DB, GAIN_STEP_DB},
         bands::BandSettings,
+        loudest::{self, Readout},
     },
     config::{self, Settings},
     input::Action,
@@ -39,6 +40,7 @@ use crate::{
     },
     ui::{
         Toast, Ui,
+        debug_hud::{DebugLabels, describe_peak, hz_long},
         fps_hud::{FpsDetail, FpsHud},
         overlay::{self, Hud, PanelInfo},
     },
@@ -97,6 +99,8 @@ pub struct Session {
     fade: SilenceFade,
     cursor: CursorHider,
     frame_stats: FrameStats,
+    /// The loudest frequency, for the debug readouts.
+    loudest: Readout,
     last_frame: Instant,
 }
 
@@ -146,6 +150,7 @@ impl Session {
             fade: SilenceFade::default(),
             cursor: CursorHider::default(),
             frame_stats: FrameStats::default(),
+            loudest: Readout::default(),
             last_frame: Instant::now(),
             displays: vec![main],
             slices: vec![WHOLE],
@@ -387,6 +392,8 @@ impl Session {
         self.analyzer.analyze(sample_rate, dt);
         let (beat, silent) = {
             let audio = self.analyzer.frame();
+            let peak = loudest::loudest(audio.spectrum_db, sample_rate);
+            self.loudest.update(peak, dt);
             (audio.beat.then_some(audio.beat_intensity), audio.silent)
         };
         self.awake.update(self.settings.keep_awake, silent, dt);
@@ -425,8 +432,9 @@ impl Session {
             ..audio
         };
         if self.show_debug {
+            let scale = self.window().scale_factor() as f32;
             self.debug_view
-                .update(self.gpu.queue(), &audio, sample_rate, size, dt);
+                .update(self.gpu.queue(), &audio, sample_rate, size, scale, dt);
         } else {
             self.switcher.advance(dt);
             let current = self.switcher.current();
@@ -524,6 +532,15 @@ impl Session {
         }
     }
 
+    /// The audio line of the detailed FPS readout.
+    fn audio_summary(&self) -> String {
+        let rate = hz_long(self.capture.sample_rate() as f32);
+        match self.loudest.shown() {
+            Some(peak) => format!("{rate} audio · loudest {}", describe_peak(peak)),
+            None => format!("{rate} audio · quiet"),
+        }
+    }
+
     /// Lays out the overlay and HUD, then acts on anything the user changed.
     fn build_ui(&mut self) {
         let before = self.settings.clone();
@@ -557,7 +574,15 @@ impl Session {
                     showing: self.showing(),
                     figures: *self.frame_stats.detail(),
                     recent_ms: self.frame_stats.recent_ms(),
+                    audio: self.audio_summary(),
                 }),
+            }),
+            // Span mode splits the canvas across windows; the labels only
+            // fit the whole-canvas layout of a single window.
+            debug: (self.show_debug && !self.spanning).then(|| DebugLabels {
+                sample_rate: self.capture.sample_rate(),
+                band_edges: self.analyzer.frame().bands.edges().to_vec(),
+                loudest: self.loudest.shown(),
             }),
             capture_error: capture_error.as_deref(),
         };

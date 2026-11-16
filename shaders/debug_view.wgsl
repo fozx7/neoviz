@@ -17,7 +17,13 @@ struct Params {
     band_count: f32,
     flash: f32,      // beat flash, 0..1
     silent: f32,     // 1.0 when silent
-    _pad: vec2f,
+    // Layout (set from Rust, which draws the labels over it):
+    wave_end: f32,   // fraction of the height where the waveform panel ends
+    spec_end: f32,   // ... and the spectrum panel
+    bars_width: f32, // fraction of the bands panel's width for the bars
+    label_strip: f32, // pixels under the bars kept clear for labels
+    min_hz: f32,     // left edge of the spectrum's log axis
+    _pad: f32,
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -29,13 +35,6 @@ const ROW_BANDS: i32 = 2;
 const ROW_PEAKS: i32 = 3;
 const ROW_LEVELS: i32 = 4;
 
-// Vertical split: fraction of the height at which each panel ends.
-const WAVE_END: f32 = 0.25;
-const SPEC_END: f32 = 0.55;
-// Fraction of the bands panel's width given to the bars (rest is meters).
-const BARS_WIDTH: f32 = 0.84;
-
-const MIN_HZ: f32 = 20.0;
 const MAX_SPAN: i32 = 256; // cap on samples/bins scanned per pixel column
 const BG: vec3f = vec3f(0.015, 0.015, 0.03);
 const GRID: vec3f = vec3f(0.07, 0.07, 0.11);
@@ -95,13 +94,13 @@ fn draw_wave(px: vec2f, size: vec2f) -> vec3f {
 // Fractional FFT bin at horizontal pixel `x` on a log axis from MIN_HZ to Nyquist.
 fn bin_at(x: f32, w: f32) -> f32 {
     let nyquist = p.sample_rate * 0.5;
-    let hz = MIN_HZ * pow(nyquist / MIN_HZ, x / w);
+    let hz = p.min_hz * pow(nyquist / p.min_hz, x / w);
     return hz / p.sample_rate * p.fft_size;
 }
 
 fn x_of_hz(hz: f32, w: f32) -> f32 {
     let nyquist = p.sample_rate * 0.5;
-    return w * log(hz / MIN_HZ) / log(nyquist / MIN_HZ);
+    return w * log(hz / p.min_hz) / log(nyquist / p.min_hz);
 }
 
 fn draw_spectrum(px: vec2f, size: vec2f) -> vec3f {
@@ -163,15 +162,21 @@ fn draw_bands(px: vec2f, size: vec2f) -> vec3f {
         bg = SILENT_TINT;
     }
 
-    let bars_w = size.x * BARS_WIDTH;
+    // The strip along the bottom holds the labels.
+    let bars_h = max(size.y - p.label_strip, 1.0);
+    if (px.y >= bars_h) {
+        return BG;
+    }
+
+    let bars_w = size.x * p.bars_width;
     if (px.x < bars_w) {
         let slot_w = bars_w / p.band_count;
         let i = i32(floor(px.x / slot_w));
         let slot = vec2f(f32(i) * slot_w, f32(i + 1) * slot_w);
-        var col = bar(px, size.y, slot, load(ROW_BANDS, i, p.band_count), BAR_LOW, BAR_HIGH, bg);
+        var col = bar(px, bars_h, slot, load(ROW_BANDS, i, p.band_count), BAR_LOW, BAR_HIGH, bg);
 
         // Peak cap: a 2px line at the peak height.
-        let peak_y = (1.0 - load(ROW_PEAKS, i, p.band_count)) * size.y;
+        let peak_y = (1.0 - load(ROW_PEAKS, i, p.band_count)) * bars_h;
         if (px.x >= slot.x + 1.0 && abs(px.y - peak_y) < 1.0) {
             col = PEAK_CAP;
         }
@@ -190,10 +195,10 @@ fn draw_bands(px: vec2f, size: vec2f) -> vec3f {
         vec3f(0.3, 0.5, 1.0),
     );
     let c = colors[clamp(m, 0, 3)];
-    var col = bar(px, size.y, slot, value, c * 0.5, c, bg);
+    var col = bar(px, bars_h, slot, value, c * 0.5, c, bg);
 
     // The RMS meter also marks the sample peak.
-    let peak_y = (1.0 - clamp(load(ROW_LEVELS, 4, 5.0), 0.0, 1.0)) * size.y;
+    let peak_y = (1.0 - clamp(load(ROW_LEVELS, 4, 5.0), 0.0, 1.0)) * bars_h;
     if (m == 0 && px.x >= slot.x && px.x < slot.y && abs(px.y - peak_y) < 1.0) {
         col = PEAK_CAP;
     }
@@ -204,8 +209,8 @@ fn draw_bands(px: vec2f, size: vec2f) -> vec3f {
 fn fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
     let w = p.resolution.x;
     let h = p.resolution.y;
-    let wave_end = h * WAVE_END;
-    let spec_end = h * SPEC_END;
+    let wave_end = h * p.wave_end;
+    let spec_end = h * p.spec_end;
 
     var col: vec3f;
     if (pos.y < wave_end) {
