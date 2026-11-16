@@ -58,16 +58,25 @@ struct Light {
     power: f32,
 }
 
-// The three lights, drifting on slow loops around the centre.
+// A point on a flat ellipse around the centre (the dust band runs across
+// it, so a light on this path passes behind the band and out the other side),
+// with a slight wobble so the path never quite repeats.
+fn orbit(angle: f32, radius: vec2f) -> vec2f {
+    let wobble = 1.0 + 0.12 * sin(angle * 2.3 + 1.0);
+    return vec2f(cos(angle), sin(angle)) * radius * wobble;
+}
+
+// The three lights, each slowly circling behind the dust on its own path
+// (the treble one the opposite way), about once every 1.5 to 2 minutes.
 fn lights() -> array<Light, 3> {
     let a = p.extra.y * TAU;
     let swell = 1.0 + 0.4 * p.extra.z + 0.8 * p.flash;
     return array<Light, 3>(
-        Light(vec2f(0.05 + 0.25 * sin(a * 0.7), -0.14 + 0.07 * cos(a * 1.1)),
+        Light(orbit(a * 0.5, vec2f(0.55, 0.24)),
               BASS_LIGHT, (0.35 + 1.6 * p.bass) * swell),
-        Light(vec2f(-0.38 + 0.18 * sin(a * 0.9 + 1.0), 0.13 + 0.06 * sin(a * 1.6)),
+        Light(orbit(a * 0.37 + 2.1, vec2f(0.72, 0.3)),
               MID_LIGHT, (0.3 + 1.4 * p.mid) * swell),
-        Light(vec2f(0.32 + 0.2 * sin(a * 1.2 + 2.0), 0.12 + 0.07 * cos(a * 0.8)),
+        Light(orbit(-a * 0.43 + 4.2, vec2f(0.48, 0.2)),
               TREBLE_LIGHT, (0.25 + 1.6 * p.treble) * swell),
     );
 }
