@@ -29,6 +29,8 @@ const SKY_TOP: vec3f = vec3f(0.12, 0.15, 0.16);
 const CLOUD_DARK: vec3f = vec3f(0.1, 0.12, 0.13);
 const CLOUD_LIGHT: vec3f = vec3f(0.5, 0.55, 0.53);
 const HAZE: vec3f = vec3f(0.3, 0.36, 0.33);
+// The mist the far field and the sky both fade into at the horizon.
+const MIST: vec3f = vec3f(0.33, 0.385, 0.365);
 const UNDERGROWTH: vec3f = vec3f(0.035, 0.07, 0.035);
 const GREEN: vec3f = vec3f(0.07, 0.15, 0.06);
 const SAGE: vec3f = vec3f(0.17, 0.25, 0.13);
@@ -128,14 +130,16 @@ fn sky(q: vec2f) -> vec3f {
 }
 
 fn looking_out(q: vec2f, pixel: f32) -> vec3f {
-    // Behind the grass: sky, the far edge of the moor, and the far field.
-    var col: vec3f;
-    let rise = HORIZON + 0.012 + 0.03 * smooth_fbm(vec2f(q.x * 0.8 + 8.0, 0.5));
-    if (q.y > rise) {
-        col = sky(q);
-    } else if (q.y > HORIZON) {
-        col = mix(HAZE, SKY_LOW, 0.3);
-    } else {
+    // Behind the grass: the sky, then two low lines of distant land (a
+    // paler far one, a nearer one), all with soft edges.
+    var col = sky(q);
+    let far_land = HORIZON + 0.006 + 0.035 * pow(smooth_fbm(vec2f(q.x * 0.6 + 8.0, 0.5)), 1.4)
+        + 0.01 * smooth_fbm(vec2f(q.x * 3.0, 1.5));
+    let near_land = HORIZON + 0.002 + 0.02 * smooth_fbm(vec2f(q.x * 1.3 + 2.0, 3.5));
+    let soft = 2.0 * pixel;
+    col = mix(col, mix(HAZE * 0.9, MIST, 0.6), smoothstep(far_land + soft, far_land - soft, q.y));
+    col = mix(col, mix(HAZE * 0.8, MIST, 0.35), smoothstep(near_land + soft, near_land - soft, q.y));
+    if (q.y < HORIZON) {
         // Between and beyond the blades: dense undergrowth, fading into the
         // haze with distance; the far field rolls gently and shows the gusts
         // as paler bands.
@@ -145,7 +149,7 @@ fn looking_out(q: vec2f, pixel: f32) -> vec3f {
         let far = smoothstep(4.0, 25.0, z);
         let field = mix(mix(GREEN, SAGE, rolling), SHEEN, 0.5 * far_gust) * (0.75 + 0.5 * rolling);
         col = mix(UNDERGROWTH, field, far);
-        col = mix(col, HAZE, 1.0 - exp(-(z - NEAREST) * 0.03));
+        col = mix(col, MIST, 1.0 - exp(-(z - NEAREST) * 0.03));
     }
 
     // The grass, nearest row first, stopping once a pixel is covered.
@@ -159,7 +163,11 @@ fn looking_out(q: vec2f, pixel: f32) -> vec3f {
         }
         z *= ROW_GROWTH;
     }
-    return col * (1.0 - grass.a) + grass.rgb;
+    col = col * (1.0 - grass.a) + grass.rgb;
+
+    // Mist lying along the horizon, so land and sky melt into each other.
+    let mist = exp(-abs(q.y - (HORIZON + 0.015)) * 16.0);
+    return mix(col, MIST, 0.6 * mist);
 }
 
 @fragment
