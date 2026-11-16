@@ -57,7 +57,7 @@ impl Scene {
             Self::EventHorizon => (0.35 + 0.9 * audio.mid + 0.5 * audio.bass, 0.02),
             Self::OilOnIce => (0.03 + 0.15 * audio.mid + 0.09 * audio.bass, 0.02),
             Self::BurningWorld => (0.012 + 0.03 * audio.bass, 0.01),
-            Self::DeepNebula => (0.04 + 0.1 * audio.mid, 0.012),
+            Self::DeepNebula => (0.03 + 0.08 * audio.mid, 0.025),
         }
     }
 }

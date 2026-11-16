@@ -1,50 +1,111 @@
-// Deep Nebula: drifting through a painterly nebula. Layers of coloured gas
-// (teal, magenta, gold) at different depths slide past at different speeds,
-// dark dust lanes cut across them, and bright stars shine through.
+// Deep Nebula: a glowing nebula behind a band of dark dust. Three lights
+// hidden behind the dust (one each for the bass, mids and treble) drift
+// slowly and swell with their part of the music, so light bursts out above
+// and below the band, catches its edges, and streams out through the gaps
+// in rays. The glow fades from white-gold through peach and pink to a deep
+// blue-violet sky.
 //
-// Bass lights the big clouds at the back, the mids the middle layer, the
-// treble the fine wisps in front (and makes stars twinkle). Each beat sends
-// a wave of light out through the gas from the bright star at the centre.
-//
-// p.extra.x = gas flow clock, p.extra.y = drift clock (the camera's pan),
+// p.extra.x = dust flow clock, p.extra.y = light drift clock,
 // p.extra.z = loudness, smoothed.
 
-const DEEP: vec3f = vec3f(0.008, 0.01, 0.03);
-const DEEP_GLOW: vec3f = vec3f(0.04, 0.02, 0.07);
-const TEAL: vec3f = vec3f(0.1, 0.55, 0.65);
-const MAGENTA: vec3f = vec3f(0.7, 0.16, 0.5);
-const GOLD: vec3f = vec3f(1.0, 0.6, 0.25);
-const DUST_RIM: vec3f = vec3f(0.9, 0.45, 0.2);
-const CORE_POS: vec2f = vec2f(0.25, 0.1);
+const SKY_EDGE: vec3f = vec3f(0.012, 0.016, 0.06);
+const SKY_MID: vec3f = vec3f(0.1, 0.05, 0.17);
+const HAZE: vec3f = vec3f(0.75, 0.38, 0.6);
+const DUST_DARK: vec3f = vec3f(0.025, 0.01, 0.018);
+const DUST_LIT: vec3f = vec3f(0.9, 0.38, 0.22);
+// Colours of the bass, mid and treble lights.
+const BASS_LIGHT: vec3f = vec3f(1.0, 0.62, 0.3);
+const MID_LIGHT: vec3f = vec3f(1.0, 0.82, 0.62);
+const TREBLE_LIGHT: vec3f = vec3f(1.0, 0.62, 0.82);
+// Samples taken towards the lights for the rays through the dust.
+const RAY_STEPS: i32 = 14;
+const RAY_REACH: f32 = 0.6;   // how far towards the lights the rays look
+const RAY_DECAY: f32 = 0.92;
 
-// One layer of gas: domain-warped noise. Returns density, 0..~1.
-fn gas(q: vec2f, t: f32, seed: f32) -> f32 {
-    let warp = vec2f(
-        smooth_fbm(q + vec2f(seed, 0.3 * t)),
-        smooth_fbm(q + vec2f(4.7 + seed, 1.9) - 0.25 * t),
-    );
-    let v = smooth_fbm(q + 2.4 * warp + vec2f(0.1 * t, seed));
-    return smoothstep(0.42, 0.85, v);
+// Where the band of dust runs: its centre line wanders a little.
+fn dust_band(q: vec2f) -> f32 {
+    let centre = 0.05 * sin(q.x * 1.3 + 0.5) - 0.03 * q.x;
+    let width = 0.17 + 0.07 * sin(q.x * 2.1 + 1.0);
+    return exp(-pow((q.y - centre) / width, 2.0));
 }
 
-// Stars at one depth: faint dots, and with `big` a few bright ones with
-// diffraction spikes.
-fn stars(q: vec2f, density: f32, big: bool) -> vec3f {
-    let cell = floor(q);
+// Dust density, 0..1: the band broken up into clumps and wisps.
+fn dust(q: vec2f, t: f32) -> f32 {
+    let warp = vec2f(
+        smooth_fbm(q * 1.8 + vec2f(0.2 * t, 0.0)),
+        smooth_fbm(q * 1.8 + vec2f(5.2, -0.15 * t)),
+    );
+    // Big clumps, plus fine wispy detail.
+    let clumps = smooth_fbm(q * 2.6 + 1.4 * warp)
+        + 0.18 * (smooth_fbm(q * 9.0 + 3.0 * warp) - 0.5);
+    let b = dust_band(q);
+    // Thick in the middle of the band, ragged at its edges, with stray
+    // clouds trailing off to the sides.
+    let core = b * smoothstep(0.3, 0.62, clumps + 0.22 * b);
+    let strays = (1.0 - b) * 0.6 * smoothstep(0.58, 0.75, clumps) * exp(-abs(q.y) * 2.5);
+    return clamp(core + strays, 0.0, 1.0);
+}
+
+// A cheaper dust estimate for the rays (they sample it many times).
+fn dust_lite(q: vec2f, t: f32) -> f32 {
+    let b = dust_band(q);
+    return b * smoothstep(0.3, 0.62, smooth_fbm(q * 2.6 + vec2f(0.1 * t, 0.0)) + 0.22 * b);
+}
+
+struct Light {
+    pos: vec2f,
+    colour: vec3f,
+    power: f32,
+}
+
+// The three lights, drifting on slow loops around the centre.
+fn lights() -> array<Light, 3> {
+    let a = p.extra.y * TAU;
+    let swell = 1.0 + 0.4 * p.extra.z + 0.8 * p.flash;
+    return array<Light, 3>(
+        Light(vec2f(0.05 + 0.25 * sin(a * 0.7), -0.14 + 0.07 * cos(a * 1.1)),
+              BASS_LIGHT, (0.35 + 1.6 * p.bass) * swell),
+        Light(vec2f(-0.38 + 0.18 * sin(a * 0.9 + 1.0), 0.13 + 0.06 * sin(a * 1.6)),
+              MID_LIGHT, (0.3 + 1.4 * p.mid) * swell),
+        Light(vec2f(0.32 + 0.2 * sin(a * 1.2 + 2.0), 0.12 + 0.07 * cos(a * 0.8)),
+              TREBLE_LIGHT, (0.25 + 1.6 * p.treble) * swell),
+    );
+}
+
+// Light reaching `q` from the lights, before the dust blocks any of it:
+// a bright core and a wide soft halo for each.
+fn glow(q: vec2f, ls: array<Light, 3>) -> vec3f {
+    var sum = vec3f(0.0);
+    for (var i = 0; i < 3; i++) {
+        let d = length(q - ls[i].pos);
+        let shape = 3.0 * exp(-d * d * 22.0) + 0.5 * exp(-d * 4.5);
+        sum += ls[i].colour * shape * ls[i].power;
+    }
+    return sum;
+}
+
+// Hot light looks whiter: push bright glow towards white.
+fn whiten(c: vec3f) -> vec3f {
+    let lum = dot(c, vec3f(0.3, 0.5, 0.2));
+    return mix(c, vec3f(lum), smoothstep(0.8, 2.5, lum) * 0.6);
+}
+
+fn stars(q: vec2f) -> vec3f {
+    let g = q * 70.0;
+    let cell = floor(g);
     let h = hash22(cell + 17.0);
-    if (h.x < 1.0 - density) {
+    if (h.x < 0.92) {
         return vec3f(0.0);
     }
-    let centre = 0.2 + 0.6 * hash22(cell + 31.0);
-    let d = fract(q) - centre;
-    let bright = (h.x - (1.0 - density)) / density;
-    let twinkle = 1.0 + (0.2 + 0.8 * p.treble) * 0.35 * sin(p.time * (1.0 + 4.0 * h.y) + h.y * 50.0);
-    let tint = mix(vec3f(0.7, 0.8, 1.0), vec3f(1.0, 0.85, 0.7), h.y);
-    var light = smoothstep(0.06, 0.0, length(d)) * bright;
-    if (big && bright > 0.6) {
-        let spikes = exp(-abs(d.x) * 120.0) * exp(-abs(d.y) * 9.0)
-            + exp(-abs(d.y) * 120.0) * exp(-abs(d.x) * 9.0);
-        light += (0.02 / (dot(d, d) * 400.0 + 0.02) * 0.6 + spikes) * bright;
+    let d = fract(g) - (0.2 + 0.6 * hash22(cell + 31.0));
+    let bright = (h.x - 0.92) / 0.08;
+    let twinkle = 1.0 + (0.2 + 0.8 * p.treble) * 0.4 * sin(p.time * (1.0 + 4.0 * h.y) + h.y * 50.0);
+    let tint = mix(vec3f(0.7, 0.8, 1.0), vec3f(1.0, 0.75, 0.8), h.y);
+    var light = smoothstep(0.07, 0.0, length(d)) * bright;
+    if (bright > 0.85) {
+        let spikes = exp(-abs(d.x) * 90.0) * exp(-abs(d.y) * 7.0)
+            + exp(-abs(d.y) * 90.0) * exp(-abs(d.x) * 7.0);
+        light += spikes * bright;
     }
     return tint * light * twinkle;
 }
@@ -53,44 +114,49 @@ fn stars(q: vec2f, density: f32, big: bool) -> vec3f {
 fn fs(in: FullscreenOut) -> @location(0) vec4f {
     let uv = centered(in.uv);
     let t = p.extra.x;
-    // The camera pans slowly; nearer layers slide past faster.
-    let pan = vec2f(p.extra.y * 0.9, 0.25 * sin(p.extra.y * 1.3));
+    // A very slow sway, so the scene breathes without wandering off.
+    let q = uv * 0.85 + 0.04 * vec2f(sin(p.extra.y * 2.0), cos(p.extra.y * 1.5));
+    let ls = lights();
 
-    var col = mix(DEEP, DEEP_GLOW, smoothstep(-1.0, 1.0, uv.y + 0.4 * uv.x));
-    col += stars(uv * 90.0 + pan * 9.0, 0.05, false) * 0.6;
+    // The sky: deep blue-violet, warming towards the middle.
+    let centre_dist = length(q * vec2f(0.6, 1.0));
+    var col = mix(SKY_MID, SKY_EDGE, smoothstep(0.1, 1.2, centre_dist));
+    col += stars(uv);
 
-    // A beat's wave of light, travelling out from the core as the flash fades.
-    let from_core = length(uv - CORE_POS);
-    let wave = p.flash * exp(-pow((from_core - (1.0 - p.flash) * 2.0) * 3.0, 2.0));
-    let lit = 1.0 + 1.5 * wave + 0.4 * p.extra.z;
+    // Glow from the lights, partly scattered in front of the dust as haze.
+    let light_here = glow(q, ls);
+    let thickness = dust(q, t);
+    let through = exp(-thickness * 4.5);
+    col += HAZE * 0.05 * dot(light_here, vec3f(0.33)) * (1.0 + p.extra.z);
+    col += whiten(light_here) * through;
 
-    // Back: big, soft teal clouds (bass).
-    let back = gas(uv * 0.9 + pan * 0.3, t * 0.6, 0.0);
-    col += TEAL * back * back * (0.25 + 0.9 * p.bass) * lit;
+    // Rays: walk towards the lights' centre, adding up light that got past
+    // the dust along the way.
+    var centre = vec2f(0.0);
+    var total = 0.0;
+    for (var i = 0; i < 3; i++) {
+        centre += ls[i].pos * ls[i].power;
+        total += ls[i].power;
+    }
+    centre /= max(total, 1e-3);
+    let step = (centre - q) * RAY_REACH / f32(RAY_STEPS);
+    var ray_q = q;
+    var weight = 1.0;
+    var rays = vec3f(0.0);
+    for (var i = 0; i < RAY_STEPS; i++) {
+        ray_q += step;
+        let open = exp(-dust_lite(ray_q, t) * 4.0);
+        rays += glow(ray_q, ls) * open * weight;
+        weight *= RAY_DECAY;
+    }
+    col += rays * (0.06 + 0.04 * p.flash) * (1.0 - 0.5 * thickness);
 
-    // Middle: magenta and gold, mixed by a slow colour field (mids).
-    let mid_q = uv * 1.5 + pan * 0.6;
-    let middle = gas(mid_q, t, 7.3);
-    let hue = smooth_fbm(mid_q * 0.5 + 3.0);
-    let mid_colour = mix(MAGENTA, GOLD, smoothstep(0.35, 0.7, hue));
-    col += mid_colour * middle * (0.2 + 0.9 * p.mid) * lit;
+    // The dust itself: dark, but its thin edges glow with the light behind.
+    let edge = thickness * (1.0 - thickness) * 4.0;
+    let backlight = dot(light_here, vec3f(0.33));
+    let dust_colour = DUST_DARK + DUST_LIT * edge * backlight * 0.6;
+    col = mix(col, dust_colour, smoothstep(0.0, 0.6, thickness) * 0.95);
 
-    // The bright star at the core, lighting the gas around it.
-    let core = exp(-from_core * 4.0);
-    col += GOLD * core * (0.5 + middle) * (0.4 + 0.8 * p.bass + 1.2 * p.flash);
-
-    // Dust lanes: dark bands of dust that block the glow, with lit edges.
-    let dust_q = uv * 1.2 + pan * 0.8 + vec2f(0.05 * t, 0.0);
-    let dust = smoothstep(0.48, 0.6, smooth_fbm(dust_q + 1.5 * smooth_fbm(dust_q * 0.7 + 9.0)));
-    let dust_edge = dust * (1.0 - dust) * 4.0;
-    col = col * (1.0 - 0.92 * dust) + DUST_RIM * dust_edge * (middle + back) * 0.3 * lit;
-
-    // Front: fine bright wisps (treble), and nearer stars.
-    let front_q = uv * 3.0 + pan * 1.4;
-    let wisps = gas(front_q, t * 1.6, 13.1);
-    col += mix(TEAL, vec3f(0.8, 0.9, 1.0), 0.5) * wisps * wisps * (0.06 + 0.5 * p.treble) * lit;
-    col += stars(uv * 22.0 + pan * 30.0, 0.04, true) * (1.0 - 0.7 * dust);
-
-    let vignette = 1.0 - 0.45 * dot(in.uv - 0.5, in.uv - 0.5) * 2.0;
+    let vignette = 1.0 - 0.4 * dot(in.uv - 0.5, in.uv - 0.5) * 2.0;
     return vec4f(col * vignette, 1.0);
 }
